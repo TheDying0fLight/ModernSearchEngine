@@ -6,10 +6,10 @@
 - Code Struktur: reguläre python files, die nach bedarf in ordner organisiert sind. Jupyter notebooks für schnelles testing und/oder präsentation (NICHT für projekt relevante funktionalität)
 # Themen (Temporär, Später über Issues)
 - Crawler
-- - Kilian, Simon
+  - Kilian, Simon
 - Ranker
-- - Simon, Jan
+  - Simon, Jan
 - Presentation
-- - Kilian, Carina
+  - Kilian, Carina
 - Creative
-- - Carina, Jan
+  - Carina, Jan
