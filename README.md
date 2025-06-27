@@ -1,1 +1,1 @@
-# Modern-Search-Engines-Lecture
+# Modern-Search-Engines-Projekt
