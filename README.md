@@ -9,7 +9,7 @@
 - Ranker
   - Simon, Jan
 - Presentation
-  - Kilian, Carina
+  - Kilian, Carina, Martin
 - Creative
   - Carina, Jan, Martin
 ## Meeting 
