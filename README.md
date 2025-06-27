@@ -12,3 +12,5 @@
   - Kilian, Carina
 - Creative
   - Carina, Jan
+## Meeting 
+- Geplant: Jeden Freitag um 10:00
