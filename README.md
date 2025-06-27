@@ -1,4 +1,3 @@
-# Modern-Search-Engines-Project
 # Modern-Search-Engines-Projekt
 ## Organisatorisches
 - Branch Benamung: Erster Buchstabe des Eigenen namens + branch namen
