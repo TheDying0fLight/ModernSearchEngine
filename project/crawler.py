@@ -151,9 +151,10 @@ class Crawler:
         self.proxy_manager = ProxyManager(max_workers=max_workers)
         self.lock = threading.Lock()
         self.max_workers = max_workers
-        self.keywords = [kw.lower() for kw in (keywords or ['universität', 'neckar', 'tübingen', 'tuebingen'])]
+        self.keywords = [kw.lower() for kw in (keywords or ['neckar', 'tübingen', 'tuebingen'])]
         # allowed hostname prefixes (e.g., language subdomains)
         self.allowed_prefixes = ['www.', 'en.']
+        self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
 
     def download_url(self, url):
         last_exc = None
@@ -187,6 +188,7 @@ class Crawler:
     def get_linked_urls(self, url, html):
         soup = BeautifulSoup(html, 'html.parser')
         for link in soup.find_all('a', href=True):
+            if any(map(lambda x: x in link, self.filtered_substrings)): continue
             href = link['href']
             if href.startswith('/'):
                 href = urljoin(url, href)
