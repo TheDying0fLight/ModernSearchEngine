@@ -1,7 +1,7 @@
 import logging
 import random
 import requests
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from collections import deque
 import re
@@ -133,6 +133,8 @@ class Crawler:
         self.lock = threading.Lock()
         self.max_workers = max_workers
         self.keywords = [kw.lower() for kw in (keywords or ['universität', 'neckar', 'bingen'])]
+        # allowed hostname prefixes (e.g., language subdomains)
+        self.allowed_prefixes = ['www.', 'en.']
 
     def download_url(self, url):
         last_exc = None
@@ -166,12 +168,15 @@ class Crawler:
     def get_linked_urls(self, url, html):
         soup = BeautifulSoup(html, 'html.parser')
         for link in soup.find_all('a', href=True):
-            path = link['href']
-            if path.startswith('/'):
-                path = urljoin(url, path)
-            elif not path.startswith('http'):
+            href = link['href']
+            if href.startswith('/'):
+                href = urljoin(url, href)
+            elif not href.startswith('http'):
                 continue
-            yield path
+            parsed = urlparse(href)
+            host = parsed.hostname or ''
+            if any(host.startswith(p) for p in self.allowed_prefixes):
+                yield href
 
     def add_url_to_visit(self, url):
         with self.lock:
@@ -192,13 +197,11 @@ class Crawler:
         english = False
         try:
             html = self.download_url(url)
-            # check if page is English
             english = self.is_english(html)
             if not english:
                 logging.info(f"Page {url} skipped: not detected as English.")
                 return
             text_lower = html.lower()
-            # check for keywords
             keywords_found = any(kw in text_lower for kw in self.keywords)
             if keywords_found:
                 for linked_url in self.get_linked_urls(url, html):
