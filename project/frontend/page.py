@@ -3,6 +3,7 @@ import flet as ft
 from .search_bar import SearchBarComponent
 
 class SearchEnginePage:
+    """Main page of the search engine"""
     def __init__(self, page: ft.Page):
         self.page = page
         page.title = "Search Engine"
@@ -22,6 +23,7 @@ class SearchEnginePage:
 
 
 class PageFactory:
+    """Creates new pages of type `SearchEnginePage`"""
     def __init__(self):
         pass
 

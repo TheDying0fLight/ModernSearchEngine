@@ -12,7 +12,7 @@ class SearchBarComponent(ft.SearchBar):
             ])
         super().__init__(
             view_elevation=4,
-            divider_color=ft.Colors.AMBER,
+            divider_color=ft.Colors.BLUE,
             bar_hint_text="Search in Tübingen ...",
             view_hint_text="Search in Tübingen ...",
             on_change=self.handle_change,
