@@ -1,4 +1,4 @@
-from .frontend import SearchEnginePage
+from .frontend import PageFactory
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -8,5 +8,5 @@ parser.add_argument("--port", help = "Port of the Website", default='8080')
 
 args = parser.parse_args()
 
-page = SearchEnginePage()
-page.run(host=args.host, port=int(args.port))
+factory = PageFactory()
+factory.run(host=args.host, port=int(args.port))

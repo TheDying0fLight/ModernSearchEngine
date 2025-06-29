@@ -1,9 +1,11 @@
 import flet as ft
 
 class SearchBarComponent(ft.SearchBar):
+    """Search bar with suggestions"""
+
     def __init__(self, search_func):
         self.search_func = search_func
-        self.dummy_words = ["hello", "tubingen", "tübingen", "search", "engine", "class", "historic"]
+        self.dummy_words = ["hello", "tubingen", "tübingen", "search", "engine", "class", "historic"] # TODO: Actual suggestions
         self.suggestions = ft.ListView([
                 ft.ListTile(title=ft.Text(word), on_click=self.handle_suggestion_submit, data=word)
                 for word in self.dummy_words
@@ -22,7 +24,7 @@ class SearchBarComponent(ft.SearchBar):
     def handle_change(self, e: ft.ControlEvent):
         self.suggestions.controls = [
                 ft.ListTile(title=ft.Text(word), on_click=self.handle_suggestion_submit, data=word)
-                for word in self.dummy_words if e.data in word
+                for word in self.dummy_words if e.data in word # TODO: Find actual suggestions
             ]
         self.update()
 

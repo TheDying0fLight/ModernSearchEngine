@@ -1,1 +1,1 @@
-from .main import SearchEnginePage
+from .page import *
