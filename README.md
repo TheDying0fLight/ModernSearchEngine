@@ -1,4 +1,12 @@
 # Modern-Search-Engines-Projekt
+## Basic Documentation
+
+Start web app with (arguments are optional):
+
+```
+python -m project --host localhost --port 8080
+```
+
 ## Organisatorisches
 - Branch Benamung: Erster Buchstabe des Eigenen namens + branch namen
 - Requirements: nutzung einer zentralen requirements.txt, die auf Anaconda ausgeleg ist
