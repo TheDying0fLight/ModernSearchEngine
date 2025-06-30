@@ -22,11 +22,15 @@ txt_urls = [
     "https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/proxies.txt",
 ]
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)…',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,…'
-}
+default_user_agents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+ " (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+ "(KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+ "(KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+]
+
 class ProxyManager:
     def __init__(
         self,
@@ -34,7 +38,7 @@ class ProxyManager:
         timeout=2,
         max_workers=20,
         cooldown=1.0,
-        entry_ttl=86400  # time to live for proxy entries in seconds (1 day)
+        entry_ttl=86400
     ):
         self.test_url = test_url
         self.timeout = timeout
@@ -149,7 +153,7 @@ class ProxyManager:
             return chosen
 
 class Crawler:
-    def __init__(self, urls=None, max_workers=multiprocessing.cpu_count()//2, keywords=None):
+    def __init__(self, urls=None, max_workers=multiprocessing.cpu_count()//2, keywords=None, user_agents=None):
         self.visited_pages = {}
         self.urls_to_visit = deque(urls or [])
         self.proxy_manager = ProxyManager(max_workers=max_workers)
@@ -159,29 +163,57 @@ class Crawler:
         # allowed hostname prefixes (e.g., language subdomains)
         self.allowed_prefixes = ['www.', 'en.']
         self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
+        self.domain_last_access = {}
+        self.domain_lock = threading.Lock()
+        self.user_agents = user_agents or default_user_agents
+
+    def get_random_headers(self):
+        return {
+            'User-Agent': random.choice(self.user_agents),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+
+    def is_captcha_page(self, html):
+        markers = ['captcha', 'g-recaptcha', 'hcaptcha', 'confirm search was made by a human']
+        text = BeautifulSoup(html, 'html.parser').get_text(separator=' ').lower()
+        return any(m in text for m in markers)
 
     def download_url(self, url):
         last_exc = None
         attempt = 0
+        domain = urlparse(url).hostname
+
+        with self.domain_lock:
+            last_time = self.domain_last_access.get(domain)
+            now = time.time()
+            if last_time:
+                delay = random.uniform(1, 3)
+                wait_time = last_time + delay - now
+                if wait_time > 0:
+                    time.sleep(wait_time)
+            self.domain_last_access[domain] = time.time()
+
         while self.proxy_manager.proxies:
             attempt += 1
             entry = self.proxy_manager.get_random_proxy()
             proxy_url = entry['proxy']
             proxies = {'http': proxy_url, 'https': proxy_url}
+            headers = self.get_random_headers()
             start = time.time()
             try:
                 resp = requests.get(url, proxies=proxies, headers=headers, timeout=10)
+                html = resp.text
                 elapsed = time.time() - start
                 if 400 <= resp.status_code < 600:
                     logging.info(f"Received {resp.status_code} for {url} via {proxy_url}, stopping retries.")
                     return resp.text
+                if self.is_captcha_page(html):
+                    logging.warning(f"Captcha detected for {url}, retrying after backoff.")
+                    time.sleep(random.uniform(5, 10))
+                    continue
                 resp.raise_for_status()
                 self.proxy_manager.update_proxy_quality(proxy_url, success=True, elapsed=elapsed)
-                return resp.text
-            except requests.exceptions.HTTPError as http_err:
-                last_exc = http_err
-                self.proxy_manager.update_proxy_quality(proxy_url, success=False)
-                logging.warning(f"HTTP error on attempt {attempt}: {http_err}")
+                return html
             except Exception as e:
                 last_exc = e
                 self.proxy_manager.update_proxy_quality(proxy_url, success=False)
