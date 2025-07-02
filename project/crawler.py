@@ -11,7 +11,6 @@ import threading
 import multiprocessing
 from langdetect import detect, LangDetectException
 from proxy_manager import ProxyManager
-import numpy as np
 
 logging.basicConfig(
     # format='%(asctime)s %(levelname)s: %(message)s',
@@ -39,7 +38,8 @@ class Crawler:
         # allowed hostname prefixes (e.g., language subdomains)
         self.allowed_prefixes = ['www.', 'en.']
         self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
-        self.domain_locks = {}
+        self.domain_last_access = {}
+        self.domain_lock = threading.Lock()
         self.user_agents = user_agents or default_user_agents
 
     def get_random_headers(self):
@@ -49,13 +49,24 @@ class Crawler:
         }
 
     def is_captcha_page(self, html):
-        markers = ['captcha', 'g-recaptcha', 'hcaptcha', 'confirm search was made by a human']
+        markers = ['captcha', 'g-recaptcha', 'hcaptcha', 'confirm this search was made by a human']
         text = BeautifulSoup(html, 'html.parser').get_text(separator=' ').lower()
         return any(m in text for m in markers)
 
     def download_url(self, url):
         last_exc = None
         attempt = 0
+        domain = urlparse(url).hostname
+
+        with self.domain_lock:
+            last_time = self.domain_last_access.get(domain)
+            now = time.time()
+            if last_time:
+                delay = random.uniform(1, 3)
+                wait_time = last_time + delay - now
+                if wait_time > 0:
+                    time.sleep(wait_time)
+            self.domain_last_access[domain] = time.time()
 
         while self.proxy_manager.proxies:
             attempt += 1
@@ -143,14 +154,9 @@ class Crawler:
             while True:
                 with self.lock:
                     while len(futures) < self.max_workers and self.urls_to_visit:
-                        for url in self.urls_to_visit:
-                            if url in self.visited_pages: continue
-                            domain = urlparse(url).hostname
-                            if self.domain_locks.get(domain) > time.time(): continue
-                            self.domain_locks[domain] = time.time() + np.random.uniform(1, 3)
-                            futures.add(executor.submit(self.crawl, url))
-                            self.urls_to_visit.remove(url)
-                            break
+                        next_url = self.urls_to_visit.popleft()
+                        if next_url not in self.visited_pages:
+                            futures.add(executor.submit(self.crawl, next_url))
                 if not futures:
                     break
                 done, futures = set(as_completed(futures)), set()
