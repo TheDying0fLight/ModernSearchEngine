@@ -21,4 +21,4 @@ python -m project --host localhost --port 8080
 - Creative
   - Carina, Jan, Martin
 ## Meeting 
-- Geplant: Jeden Freitag um 10:00
+- Geplant: Jeden Freitag um 10:15 :D
