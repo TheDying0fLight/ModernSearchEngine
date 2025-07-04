@@ -4,16 +4,14 @@ import requests
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from collections import deque
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import multiprocessing
 from langdetect import detect, LangDetectException
-from proxy_manager import ProxyManager
+from .proxy_manager import ProxyManager
 
 logging.basicConfig(
-    # format='%(asctime)s %(levelname)s: %(message)s',
     format='%(asctime)s %(levelname)s: %(message)s',
     level=logging.INFO
 )
