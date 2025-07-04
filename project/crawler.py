@@ -10,6 +10,8 @@ import threading
 import multiprocessing
 from langdetect import detect, LangDetectException
 from .proxy_manager import ProxyManager
+from langcodes.language_lists import CLDR_LANGUAGES
+from langcodes import Language, tag_is_valid
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
@@ -34,7 +36,7 @@ class Crawler:
         self.max_workers = max_workers
         self.keywords = [kw.lower() for kw in (keywords or ['tubingen', 'tübingen', 'tuebingen'])]
         # allowed hostname prefixes (e.g., language subdomains)
-        self.allowed_prefixes = ['www.', 'en.']
+        self.allowed_lang_prefixes = ['en']
         self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
         self.domain_last_access = {}
         self.domain_lock = threading.Lock()
@@ -104,9 +106,12 @@ class Crawler:
             elif not href.startswith('http'):
                 continue
             parsed = urlparse(href)
-            host = parsed.hostname or ''
-            if any(host.startswith(p) for p in self.allowed_prefixes):
-                yield href
+            pref = parsed.netloc.split(".")[0]
+            if tag_is_valid(pref):
+                tag = Language.get(pref).language
+                if tag in CLDR_LANGUAGES and tag not in self.allowed_lang_prefixes:
+                    continue
+            yield href
 
     def add_url_to_visit(self, url):
         with self.lock:
