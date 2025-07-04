@@ -90,7 +90,7 @@ class SearchBarComponent(ft.SearchBar):
                         weight=ft.FontWeight.BOLD,
                         color=ft.Colors.BLUE_700
                     ),
-                    padding=ft.padding.only(left=16, top=8, bottom=4),
+                    padding=ft.padding.only(left=16, top=8, bottom=4, right=16),
                     bgcolor=ft.Colors.BLUE_50
                 )
                 filtered_suggestions.controls.append(header)

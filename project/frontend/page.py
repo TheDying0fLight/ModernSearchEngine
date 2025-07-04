@@ -1,14 +1,13 @@
 import flet as ft
 import time
-from datetime import datetime
 
-from .search_bar import SearchBarComponent
+from .components import HelpTab, FavoritesTab, SearchTab, HistoryTab
 
 class SearchEnginePage:
-    """Main page of the search engine with enhanced features"""
+    """Main page of the search engine with component-based architecture"""
+    
     def __init__(self, page: ft.Page):
         self.page = page
-        self.search_history = []
         self.is_searching = False
         self.current_results = []
         
@@ -20,192 +19,25 @@ class SearchEnginePage:
         page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
         page.padding = 0  # Remove padding for full width tabs
         
-        # Initialize UI components
-        self.init_components()
+        # Initialize tab components
+        self.help_tab = HelpTab()
+        self.favorites_tab = FavoritesTab(on_navigate_to_search=self.navigate_to_search_tab)
+        self.search_tab = SearchTab(search_func=self.search, on_favorite_toggle=self.handle_favorite_toggle)
+        self.history_tab = HistoryTab()
+        
+        # Set up callbacks
+        self.history_tab.set_callbacks(
+            on_search=self.search_from_history,
+            on_navigate=self.navigate_to_tab
+        )
+        
+        # Build the layout
         self.build_layout()
-
-    def init_components(self):
-        """Initialize all UI components"""
-        # Header with logo/title
-        self.header = ft.Container(
-            content=ft.Column([
-                ft.Text(
-                    "🔍 Tübingen Search", 
-                    size=32, 
-                    weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.BLUE_800
-                ),
-            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-            margin=ft.margin.only(bottom=30)
-        )
-        
-        # Search bar
-        self.search_bar = SearchBarComponent(search_func=self.search)
-        
-        # Loading indicator
-        self.loading_indicator = ft.Container(
-            content=ft.Row([
-                ft.ProgressRing(width=20, height=20),
-                ft.Text("Searching...", color=ft.Colors.BLUE_600)
-            ], alignment=ft.MainAxisAlignment.CENTER),
-            visible=False,
-            margin=ft.margin.only(top=20)
-        )
-        
-        # Search results container
-        self.results_container = ft.Container(
-            content=ft.Column([]),
-            margin=ft.margin.only(top=20),
-            visible=False
-        )
-        
-        # Search history
-        self.history_container = ft.Container(
-            content=ft.Column([
-                ft.Text("Search History", size=18, weight=ft.FontWeight.BOLD),
-                ft.Column([], scroll=ft.ScrollMode.AUTO, height=200)
-            ]),
-            margin=ft.margin.only(top=30),
-            padding=20,
-            bgcolor=ft.Colors.WHITE,
-            border_radius=10,
-            visible=False
-        )
-        
-        # Advanced search options
-        self.advanced_options = ft.ExpansionTile(
-            title=ft.Text("Advanced Search Options"),
-            subtitle=ft.Text("Filters and settings"),
-            collapsed_text_color=ft.Colors.BLUE_600,
-            text_color=ft.Colors.BLUE_800,
-            controls=[
-                ft.Container(
-                    content=ft.Column([
-                        ft.Row([
-                            ft.Checkbox(label="Search titles only", value=False),
-                            ft.Checkbox(label="Exact phrase search", value=False)
-                        ]),
-                    ]),
-                    padding=10
-                )
-            ]
-        )
-
-    def create_search_tab(self):
-        """Create the main search tab content"""
-        return ft.Container(
-            content=ft.Column([
-                self.header,
-                self.search_bar,  # Direkt die SearchBar ohne Container
-                self.advanced_options,
-                self.loading_indicator,
-                self.results_container,
-                self.history_container
-            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-            padding=20,
-            alignment=ft.alignment.top_center
-        )
-
-    def create_favorites_tab(self):
-        """Create the favorites/bookmarks tab content"""
-        return ft.Container(
-            content=ft.Column([
-                ft.Container(
-                    content=ft.Text(
-                        "⭐ Favorites", 
-                        size=24, 
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.BLUE_800
-                    ),
-                    margin=ft.margin.only(bottom=20)
-                ),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Icon(ft.Icons.BOOKMARK_BORDER, size=64, color=ft.Colors.GREY_400),
-                        ft.Text(
-                            "No favorites yet",
-                            size=18,
-                            color=ft.Colors.GREY_600,
-                            weight=ft.FontWeight.BOLD
-                        ),
-                        ft.Text(
-                            "Add documents to your favorites to see them here",
-                            size=14,
-                            color=ft.Colors.GREY_500,
-                            text_align=ft.TextAlign.CENTER
-                        )
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
-                    padding=50,
-                    alignment=ft.alignment.center,
-                    bgcolor=ft.Colors.WHITE,
-                    border_radius=10,
-                    shadow=ft.BoxShadow(
-                        spread_radius=0,
-                        blur_radius=4,
-                        color=ft.Colors.GREY_200,
-                        offset=ft.Offset(0, 2)
-                    )
-                )
-            ]),
-            padding=20,
-            alignment=ft.alignment.top_center
-        )
-
-    def create_help_tab(self):
-        """Create the help/about tab content"""
-        return ft.Container(
-            content=ft.Column([
-                ft.Container(
-                    content=ft.Text(
-                        "❓ Help", 
-                        size=24, 
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.BLUE_800
-                    ),
-                    margin=ft.margin.only(bottom=20)
-                ),
-                
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text(
-                            "This search engine helps you find information about Tübingen's attractions, food, drinks, and local culture.",
-                            size=16,
-                            color=ft.Colors.GREY_700,
-                            text_align=ft.TextAlign.CENTER
-                        ),
-                        ft.Divider(height=20, color=ft.Colors.GREY_300),
-                        ft.Text(
-                            "Project Team:",
-                            size=16,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.BLUE_700
-                        ),
-                        ft.Text(
-                            "Jan-Malte Giannikos • Simon Döhl • Carina Straub\nMartin Eichler • Kilian Hunter",
-                            size=14,
-                            color=ft.Colors.GREY_600,
-                            text_align=ft.TextAlign.CENTER
-                        )
-                    ], spacing=10),
-                    padding=30,
-                    bgcolor=ft.Colors.WHITE,
-                    border_radius=10,
-                    shadow=ft.BoxShadow(
-                        spread_radius=0,
-                        blur_radius=4,
-                        color=ft.Colors.GREY_200,
-                        offset=ft.Offset(0, 2)
-                    )
-                )
-            ], scroll=ft.ScrollMode.AUTO),
-            padding=20,
-            alignment=ft.alignment.top_center
-        )
 
     def build_layout(self):
         """Build the main page layout with tabs"""
-        # Create tabs
-        tabs = ft.Tabs(
+        # Create tabs using the component containers
+        self.tabs = ft.Tabs(
             selected_index=0,
             animation_duration=300,
             tab_alignment=ft.TabAlignment.CENTER,
@@ -214,195 +46,149 @@ class SearchEnginePage:
                 ft.Tab(
                     text="Search",
                     icon=ft.Icons.SEARCH,
-                    content=self.create_search_tab()
+                    content=self.search_tab.get_container()
+                ),
+                ft.Tab(
+                    text="History",
+                    icon=ft.Icons.HISTORY,
+                    content=self.history_tab.get_container()
                 ),
                 ft.Tab(
                     text="Favorites",
                     icon=ft.Icons.BOOKMARK,
-                    content=self.create_favorites_tab()
+                    content=self.favorites_tab.get_container()
                 ),
                 ft.Tab(
                     text="Help",
                     icon=ft.Icons.HELP,
-                    content=self.create_help_tab()
+                    content=self.help_tab.get_container()
                 )
             ]
         )
         
-        self.page.add(tabs)
+        self.page.add(self.tabs)
 
-    def search(self, key_words: str):
+    def navigate_to_search_tab(self):
+        """Navigate to the search tab"""
+        self.tabs.selected_index = 0
+        self.page.update()
+
+    def search(self, query: str):
         """Enhanced search function with loading state"""
-        if not key_words.strip():
+        if not query.strip():
             return
             
-        # Add to search history
-        self.add_to_history(key_words)
-        
-        # Show loading
-        self.show_loading(True)
-        self.results_container.visible = False
-        self.page.update()
+        # Show loading in search tab
+        self.search_tab.show_loading(True, f"Searching for '{query}'...")
         
         # Simulate search delay (replace with actual search logic)
         time.sleep(1)
         
-        # Hide loading and show results
-        self.show_loading(False)
-        self.display_results(key_words)
+        # Generate mock results
+        mock_results = self.generate_mock_results(query)
         
-    def show_loading(self, show: bool):
-        """Show/hide loading indicator"""
-        self.loading_indicator.visible = show
-        self.is_searching = show
-        self.page.update()
+        # Display results in search tab
+        self.search_tab.display_results(query, mock_results)
         
-    def add_to_history(self, query: str):
-        """Add search query to history"""
-        timestamp = datetime.now().strftime("%H:%M")
-        self.search_history.insert(0, {"query": query, "time": timestamp})
+        # Add to history
+        self.history_tab.add_to_history(query, len(mock_results))
         
-        # Keep only last 10 searches
-        if len(self.search_history) > 10:
-            self.search_history = self.search_history[:10]
-            
-        self.update_history_display()
+    def search_from_history(self, query):
+        """Search triggered from history tab"""
+        # Navigate to search tab and perform search
+        self.tabs.selected_index = 0
+        self.tabs.update()
+        self.search(query)
         
-    def update_history_display(self):
-        """Update the search history display"""
-        history_column = self.history_container.content.controls[1]
-        history_column.controls.clear()
+    def navigate_to_tab(self, tab_index):
+        """Navigate to a specific tab"""
+        self.tabs.selected_index = tab_index
+        self.tabs.update()
         
-        for item in self.search_history:
-            history_item = ft.Container(
-                content=ft.Row([
-                    ft.Icon(ft.Icons.HISTORY, size=16, color=ft.Colors.GREY_600),
-                    ft.Text(item["query"], expand=True),
-                    ft.Text(item["time"], color=ft.Colors.GREY_500, size=12)
-                ]),
-                padding=8,
-                border_radius=5,
-                bgcolor=ft.Colors.GREY_100,
-                margin=ft.margin.only(bottom=5),
-                on_click=lambda e, query=item["query"]: self.search(query)
-            )
-            history_column.controls.append(history_item)
-            
-        self.history_container.visible = len(self.search_history) > 0
-        self.page.update()
+    def navigate_to_search_tab(self):
+        """Navigate to search tab"""
+        self.navigate_to_tab(0)
         
-    def create_simple_results_view(self, results: list):
-        """Create a simple results view without document viewer"""
-        if not results:
-            return ft.Container(
-                content=ft.Column([
-                    ft.Icon(ft.Icons.SEARCH_OFF, size=64, color=ft.Colors.GREY_400),
-                    ft.Text(
-                        "No results found",
-                        size=18,
-                        color=ft.Colors.GREY_600,
-                        weight=ft.FontWeight.BOLD
-                    ),
-                    ft.Text(
-                        "Try different search terms",
-                        size=14,
-                        color=ft.Colors.GREY_500
-                    )
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
-                padding=50,
-                alignment=ft.alignment.center
-            )
+    def add_to_favorites(self, document):
+        """Add a document to favorites"""
+        return self.favorites_tab.add_favorite(document)
+    
+    def handle_favorite_toggle(self, result_data, is_favorited):
+        """Handle favorite toggle from search results"""
+        if is_favorited:
+            return self.favorites_tab.add_favorite(result_data)
+        else:
+            self.favorites_tab.remove_favorite(result_data)
+            return True
         
-        # Create simple result cards
-        result_cards = []
-        for result in results:
-            result_card = ft.Container(
-                content=ft.Column([
-                    ft.Text(
-                        result.get("title", "No Title"),
-                        size=18,
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.BLUE_700
-                    ),
-                    ft.Text(
-                        result.get("snippet", "No description available."),
-                        size=14,
-                        color=ft.Colors.GREY_700,
-                        max_lines=3
-                    ),
-                    ft.Row([
-                        ft.Text(result.get("source", "Unknown"), color=ft.Colors.GREEN_600, size=12),
-                        ft.Text("•", color=ft.Colors.GREY_400),
-                        ft.Text(result.get("date", "Unknown"), color=ft.Colors.GREY_600, size=12)
-                    ])
-                ], spacing=8),
-                padding=20,
-                margin=ft.margin.only(bottom=15),
-                bgcolor=ft.Colors.WHITE,
-                border_radius=10,
-                border=ft.border.all(1, ft.Colors.GREY_200),
-                shadow=ft.BoxShadow(
-                    spread_radius=0,
-                    blur_radius=4,
-                    color=ft.Colors.GREY_200,
-                    offset=ft.Offset(0, 2)
-                )
-            )
-            result_cards.append(result_card)
-        
-        return ft.Column(
-            controls=result_cards,
-            scroll=ft.ScrollMode.AUTO,
-            spacing=0
-        )
-        
-    def display_results(self, query: str):
-        """Display search results using DocumentViewer"""
-        # Mock results based on actual queries
-        mock_results = [
+    def generate_mock_results(self, query):
+        """Generate mock search results based on query"""
+        # Enhanced mock results with more variety
+        all_results = [
+            {
+                "id": "doc_001",
+                "title": "Historical Overview of Tübingen's Old Town",
+                "snippet": "Comprehensive guide to Tübingen's medieval architecture, historic buildings, and cultural landmarks in the old town area.",
+                "source": "Tourism Board Archives",
+                "date": "15.11.2024",
+                "pages": 24
+            },
+            {
+                "id": "doc_002", 
+                "title": "Tübingen University: A 500-Year Legacy",
+                "snippet": "The story of one of Germany's oldest universities, its famous alumni, and its impact on the city's development.",
+                "source": "University Archives",
+                "date": "03.09.2024",
+                "pages": 45
+            },
             {
                 "id": "doc_003",
-                "title": "Traditional Swabian Cuisine and Local Beverages [EXAMPLE]",
-                "snippet": "A historical account of traditional food and drinks in Tübingen. Documents local specialties, taverns, and the brewing tradition of the region.",
-                "full_text": "Historical overview of Swabian cuisine including Maultaschen, Spätzle, and regional wines. The document also covers traditional beer gardens and historic taverns...",
-                "date": "03.03.2025",
+                "title": "Traditional Swabian Cuisine and Local Beverages",
+                "snippet": "A culinary journey through Tübingen's traditional food scene, featuring local specialties, historic restaurants, and brewing traditions.",
                 "source": "Regional Food Heritage Archive",
+                "date": "22.08.2024",
                 "pages": 18
             },
             {
                 "id": "doc_004",
-                "title": "Historic Restaurants and Gastronomy [ex2]",
-                "snippet": "Chronicle of Tübingen's culinary history, featuring historic restaurants, traditional recipes, and local food markets that have served the community for centuries.",
-                "full_text": "Comprehensive record of Tübingen's gastronomic heritage, including the famous Wurstküche, traditional bakeries, and the historic market square food vendors...",
-                "date": "08.26.2001",
-                "source": "City Historical Society",
-                "pages": 12
+                "title": "Hohentübingen Castle: Fortress to Museum",
+                "snippet": "The transformation of Tübingen's castle from medieval fortress to modern museum, including archaeological discoveries.",
+                "source": "Museum Documentation",
+                "date": "07.10.2024",
+                "pages": 31
+            },
+            {
+                "id": "doc_005",
+                "title": "The Neckar River and Tübingen's Waterfront",
+                "snippet": "How the Neckar River shaped Tübingen's history, from trade routes to modern recreational activities.",
+                "source": "Environmental History Society",
+                "date": "12.07.2024",
+                "pages": 16
+            },
+            {
+                "id": "doc_006",
+                "title": "Festival Culture in Tübingen",
+                "snippet": "Annual festivals, cultural events, and celebrations that define Tübingen's vibrant community life.",
+                "source": "Cultural Events Archive",
+                "date": "28.06.2024",
+                "pages": 22
             }
         ]
         
-        self.current_results = mock_results
+        # Filter results based on query relevance
+        query_lower = query.lower()
+        relevant_results = []
         
-        # Create simple results display
-        results_view = self.create_simple_results_view(mock_results)
+        for result in all_results:
+            title_lower = result["title"].lower()
+            snippet_lower = result["snippet"].lower()
+            
+            # Simple relevance scoring
+            if any(word in title_lower or word in snippet_lower for word in query_lower.split()):
+                relevant_results.append(result)
         
-        results_header = ft.Container(
-            content=ft.Text(
-                f"Search results for '{query}' ({len(mock_results)} results)",
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                color=ft.Colors.BLUE_800
-            ),
-            margin=ft.margin.only(bottom=20)
-        )
-        
-        # Combine header and results
-        self.results_container.content = ft.Column([
-            results_header,
-            results_view
-        ])
-        
-        self.results_container.visible = True
-        self.page.update()
+        # Return relevant results or all results if no specific matches
+        return relevant_results if relevant_results else all_results[:3]
 
 
 class PageFactory:
@@ -411,7 +197,11 @@ class PageFactory:
         pass
 
     def create_page(self, page: ft.Page):
-        search_engine_page = SearchEnginePage(page)
+            search_engine_page = SearchEnginePage(page)
+            def on_connect(e):
+                page.clean()
+                search_engine_page.build_layout()
+            page.on_connect = on_connect
 
     def run(self, host: str, port: int):
         ft.app(self.create_page, view=ft.AppView.WEB_BROWSER, host=host, port=port)
