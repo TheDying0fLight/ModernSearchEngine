@@ -32,7 +32,7 @@ class Crawler:
         self.proxy_manager = ProxyManager(max_workers=max_workers)
         self.lock = threading.Lock()
         self.max_workers = max_workers
-        self.keywords = [kw.lower() for kw in (keywords or ['neckar', 'tübingen', 'tuebingen'])]
+        self.keywords = [kw.lower() for kw in (keywords or ['tubingen', 'tübingen', 'tuebingen'])]
         # allowed hostname prefixes (e.g., language subdomains)
         self.allowed_prefixes = ['www.', 'en.']
         self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
@@ -146,7 +146,8 @@ class Crawler:
                 }
                 logging.info(f"Visited {len(self.visited_pages)} pages (Visited {url}, english={english}, keywords_found={keywords_found})")
 
-    def run(self):
+    def run(self, amount: int = None):
+        start_url_amt = len(self.visited_pages)
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
             while True:
@@ -155,8 +156,8 @@ class Crawler:
                         next_url = self.urls_to_visit.popleft()
                         if next_url not in self.visited_pages:
                             futures.add(executor.submit(self.crawl, next_url))
-                if not futures:
-                    break
+                if not futures: break
+                if amount is not None and start_url_amt >= amount: break
                 done, futures = set(as_completed(futures)), set()
                 for future in done:
                     try:
@@ -174,3 +175,4 @@ def test_url(url):
         if href.startswith('/'):
             href = urljoin(url, href)
         print(href)
+    return resp
