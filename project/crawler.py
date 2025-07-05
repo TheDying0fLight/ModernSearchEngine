@@ -10,8 +10,7 @@ import threading
 import multiprocessing
 from langdetect import detect, LangDetectException
 from .proxy_manager import ProxyManager
-from langcodes.language_lists import CLDR_LANGUAGES
-from langcodes import Language, tag_is_valid
+from langcodes import Language
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
@@ -53,10 +52,11 @@ class Crawler:
         text = BeautifulSoup(html, 'html.parser').get_text(separator=' ').lower()
         return any(m in text for m in markers)
 
-    def download_url(self, url):
+    def download_url(self, url, headers=False):
         last_exc = None
         attempt = 0
         domain = urlparse(url).hostname
+        request = requests.head if headers else requests.get
 
         with self.domain_lock:
             last_time = self.domain_last_access.get(domain)
@@ -76,19 +76,18 @@ class Crawler:
             headers = self.get_random_headers()
             start = time.time()
             try:
-                resp = requests.get(url, proxies=proxies, headers=headers, timeout=10)
-                html = resp.text
+                resp = request(url, proxies=proxies, headers=headers, timeout=10)
                 elapsed = time.time() - start
                 if 400 <= resp.status_code < 600:
                     logging.info(f"Received {resp.status_code} for {url} via {proxy_url}, stopping retries.")
                     return resp.text
-                if self.is_captcha_page(html):
+                if self.is_captcha_page(resp.text):
                     logging.warning(f"Captcha detected for {url}, retrying after backoff.")
-                    time.sleep(random.uniform(5, 10))
+                    time.sleep(random.uniform(10, 20))
                     continue
                 resp.raise_for_status()
                 self.proxy_manager.update_proxy_quality(proxy_url, success=True, elapsed=elapsed)
-                return html
+                return resp
             except Exception as e:
                 last_exc = e
                 self.proxy_manager.update_proxy_quality(proxy_url, success=False)
@@ -105,12 +104,6 @@ class Crawler:
                 href = urljoin(url, href)
             elif not href.startswith('http'):
                 continue
-            parsed = urlparse(href)
-            pref = parsed.netloc.split(".")[0]
-            if tag_is_valid(pref):
-                tag = Language.get(pref).language
-                if tag in CLDR_LANGUAGES and tag not in self.allowed_lang_prefixes:
-                    continue
             yield href
 
     def add_url_to_visit(self, url):
@@ -131,8 +124,12 @@ class Crawler:
         keywords_found = False
         english = False
         try:
-            html = self.download_url(url)
-            english = self.is_english(html)
+            try:
+                headers = self.download_url(url, True).headers
+                english = Language.get(headers['content-language']).language == 'en'
+            except:
+                html = self.download_url(url).text
+                english = self.is_english(html)
             if not english:
                 logging.info(f"Page {url} skipped: not detected as English.")
                 return
