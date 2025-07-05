@@ -169,9 +169,7 @@ class Crawler:
             except:
                 html = self.download_url(url).text
                 english = self.is_english(html)
-            if not english:
-                logging.info(f"Page {url} skipped: not detected as English.")
-                return
+            if not english: raise BaseException
             html = self.download_url(url).text if html is None else html
             text_lower = html.lower()
             keywords_found = any(kw in text_lower for kw in self.keywords)
@@ -181,17 +179,16 @@ class Crawler:
                 with self.visit_lock:
                     logging.info(f"Frontier size: {len(self.urls_to_visit)}, " \
                                  f"Added {added}/{len(to_add)} URLs from {url} to the frontier")
-        except:
+        finally:
             with self.visit_lock:
                 logging.info(
                     f"Visited {len(self.visited_pages) + 1} pages (english={english}, kws_found={keywords_found}, URL: {url})")
-        with self.visit_lock:
-            self.visited_pages[url] = {
-                'keywords_found': keywords_found,
-                'is_english': english,
-            }
-        with self.domain_lock:
-            self.domain_dict[urlparse(url).hostname]['in_use'] = False
+                self.visited_pages[url] = {
+                    'keywords_found': keywords_found,
+                    'is_english': english,
+                }
+            with self.domain_lock:
+                self.domain_dict[urlparse(url).hostname]['in_use'] = False
 
     def run(self, amount: int = None):
         start_url_amt = len(self.visited_pages)
@@ -211,8 +208,8 @@ class Crawler:
                             self.domain_dict[domain]['in_use'] = True
                             futures.add((executor.submit(self.crawl, next_url), time.time()))
                 if not futures: break
-                # wait 10 seconds to start more workers
-                time.sleep(10)
+                # wait x seconds to start more workers
+                time.sleep(5)
                 now = time.time()
                 futures.difference_update(set(filter(lambda f: f[0].done() or now - f[1] > 120, futures)))
         logging.info("Crawling complete.")
