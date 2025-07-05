@@ -1,14 +1,14 @@
 import flet as ft
-from .components.suggestions_view import SuggestionsView
+from .suggestions_view import SuggestionsView
 
 
-class EnhancedSearchBar(ft.SearchBar):
+class SearchBar(ft.SearchBar):
     """Enhanced search bar with component-based suggestions"""
 
     def __init__(self, search_func):
         self.search_func = search_func
         self.suggestions_view = SuggestionsView(on_suggestion_click=self.handle_suggestion_submit)
-        
+
         super().__init__(
             width=500,
             view_elevation=8,
@@ -26,10 +26,8 @@ class EnhancedSearchBar(ft.SearchBar):
     def handle_change(self, e: ft.ControlEvent):
         """Handle search input changes with improved filtering"""
         query = e.data.lower().strip() if e.data else ""
-        
         # Update suggestions based on query
         self.suggestions_view.update_suggestions(query)
-        
         self.update()
 
     def handle_submit(self, e: ft.ControlEvent):
@@ -44,12 +42,12 @@ class EnhancedSearchBar(ft.SearchBar):
     def submit(self, data):
         """Submit search query"""
         self.close_view()
-        self.value = data 
+        self.value = data
         self.update()
-        
+
         # Add to recent searches
         self.suggestions_view.add_recent_search(data)
-        
+
         # Call search function
         if self.search_func:
             self.search_func(data)
