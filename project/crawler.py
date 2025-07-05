@@ -3,15 +3,17 @@ import random
 import requests
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
-from collections import deque
+from collections import defaultdict
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import multiprocessing
 from langdetect import detect, LangDetectException
 from .proxy_manager import ProxyManager
 from langcodes import Language
 import urllib.robotparser as urobot
+import numpy as np
+import validators
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
@@ -34,22 +36,23 @@ class Crawler:
                  max_workers: int = multiprocessing.cpu_count() // 2,
                  keywords: list = ['tubingen', 'tübingen', 'tuebingen'],
                  user_agents: list = default_user_agents,
-                 use_proxies: bool = True):
+                 use_proxies: bool = True,
+                 verbose: bool = False):
+        self.verbose = verbose
         self.use_proxies = use_proxies
         self.keywords = [kw.lower() for kw in keywords]
         self.user_agents = user_agents
         self.max_workers = max_workers
 
         self.visited_pages = {}
-        self.visited_amount = 0
-        self.urls_to_visit = deque(urls)
+        self.urls_to_visit = set(urls)
         self.proxy_manager = ProxyManager(max_workers=max_workers, verbose=False) if use_proxies else None
         self.allowed_lang_prefixes = ['en']
         self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
         self.domain_last_access = {}
         self.domain_lock = threading.Lock()
         self.visit_lock = threading.Lock()
-        self.robots_dict = {}
+        self.domain_dict = defaultdict(dict)
 
     def get_random_headers(self):
         return {
@@ -68,17 +71,15 @@ class Crawler:
         domain = urlparse(url).hostname
         request_fn = requests.head if headers else requests.get
 
-        while True:
-            with self.domain_lock:
-                last_time = self.domain_last_access.get(domain)
-            if not last_time: break
-            now = time.time()
-            delay = random.uniform(1, 3)
-            wait_time = last_time + delay - now
-            if wait_time > 0: time.sleep(wait_time)
-            else: break
         with self.domain_lock:
-            self.domain_last_access[domain] = time.time()
+            last_time = self.domain_dict['last_access']
+            if last_time:
+                now = time.time()
+                delay = random.uniform(1, 3)
+                wait_time = last_time + delay - now
+                if wait_time > 0: time.sleep(wait_time)
+        with self.domain_lock:
+            self.domain_dict[domain]['last_access'] = time.time()
 
         if not self.use_proxies:
             try:
@@ -124,22 +125,28 @@ class Crawler:
             elif href.startswith('http'): yield href
 
     def is_useragent_allowed(self, url: str):
+        domain = urlparse(url).hostname
         path = urlparse(url).path
-        domain = url.removesuffix(path)
-        if self.robots_dict.get(domain) is None:
-            robot = urobot.RobotFileParser()
-            robot.set_url(domain + "/robots.txt")
-            robot.read()
-            self.robots_dict[domain] = robot
-        return self.robots_dict[domain].can_fetch('*', path)
+        url = url.removesuffix(path)
+        with self.domain_lock:
+            if self.domain_dict.get(url) is None:
+                robot = urobot.RobotFileParser()
+                robot.set_url(url + "/robots.txt")
+                robot.read()
+                self.domain_dict[domain]['robot'] = robot
+            return self.domain_dict[domain]['robot'].can_fetch('*', path)
 
-    def add_url_to_visit(self, url: str):
-        if not self.is_useragent_allowed(url): return False
-        with self.visit_lock:
-            if url in self.visited_pages: return False
-            elif url not in self.urls_to_visit:
-                self.urls_to_visit.append(url)
-                return True
+    def add_url_to_visit(self, urls: list[str]):
+        added = 0
+        for url in urls:
+            if not validators.url(url): continue
+            if not self.is_useragent_allowed(url): continue
+            with self.visit_lock:
+                if url in self.visited_pages: continue
+                elif url not in self.urls_to_visit:
+                    self.urls_to_visit.add(url)
+                    added += 1
+        return added
 
     def is_english(self, html):
         text = BeautifulSoup(html, 'html.parser').get_text(separator=' ')
@@ -153,6 +160,7 @@ class Crawler:
     def crawl(self, url):
         keywords_found = False
         english = False
+        if self.verbose: logging.info(f"Crawling {url}")
         try:
             try:
                 headers = self.download_url(url, True).headers
@@ -168,40 +176,43 @@ class Crawler:
             text_lower = html.lower()
             keywords_found = any(kw in text_lower for kw in self.keywords)
             if keywords_found:
-                added = 0
                 to_add = set(self.get_linked_urls(url, html))
-                for linked_url in to_add:
-                    added += 1 if self.add_url_to_visit(linked_url) else 0
-                with self.visit_lock: logging.info(
-                    f"Frontier size: {len(self.urls_to_visit)}, Added {added}/{len(to_add)} URLs from {url} to the frontier")
+                added = self.add_url_to_visit(to_add)
+                with self.visit_lock:
+                    logging.info(f"Frontier size: {len(self.urls_to_visit)}, " \
+                                 f"Added {added}/{len(to_add)} URLs from {url} to the frontier")
         except:
             with self.visit_lock:
                 logging.info(
-                    f"Visited {self.visited_amount} pages (english={english}, kws_found={keywords_found}, URL: {url})")
+                    f"Visited {len(self.visited_pages) + 1} pages (english={english}, kws_found={keywords_found}, URL: {url})")
         with self.visit_lock:
             self.visited_pages[url] = {
                 'keywords_found': keywords_found,
                 'is_english': english,
-                'in_progress': False,
             }
-            self.visited_amount += 1
+        with self.domain_lock:
+            self.domain_dict[urlparse(url).hostname]['in_use'] = False
+
     def run(self, amount: int = None):
-        start_url_amt = self.visited_amount
+        start_url_amt = len(self.visited_pages)
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
             while True:
                 with self.visit_lock:
+                    if amount is not None and len(self.visited_pages) - start_url_amt >= amount: break
+
                     while len(futures) < self.max_workers and self.urls_to_visit:
-                        next_url = self.urls_to_visit.popleft()
-                        if next_url not in self.visited_pages:
-                            self.visited_pages[next_url] = {'in_progress': True}
-                            futures.add(executor.submit(self.crawl, next_url))
+                        next_url: str = np.random.choice(list(self.urls_to_visit))
+                        domain = urlparse(next_url).hostname
+                        if next_url in self.visited_pages: continue
+                        self.urls_to_visit.remove(next_url)
+                        with self.domain_lock:
+                            if self.domain_dict[domain].get('in_use'): continue
+                            self.domain_dict[domain]['in_use'] = True
+                            futures.add((executor.submit(self.crawl, next_url), time.time()))
                 if not futures: break
-                if amount is not None and self.visited_amount - start_url_amt >= amount: break
-                done, futures = set(as_completed(futures)), set()
-                for future in done:
-                    try:
-                        future.result()
-                    except Exception:
-                        pass
+                # wait 10 seconds to start more workers
+                time.sleep(10)
+                now = time.time()
+                futures.difference_update(set(filter(lambda f: f[0].done() or now - f[1] > 120, futures)))
         logging.info("Crawling complete.")

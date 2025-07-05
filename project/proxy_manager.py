@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 txt_urls = [
-    "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text",
     "https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/proxies.txt",
 ]
 
