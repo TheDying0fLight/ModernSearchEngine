@@ -38,8 +38,8 @@ class SearchTab(Tab):
             icon=ft.Icons.SEARCH,
             controls=[
                 self.header,
-                self.loading_indicator,
                 self.advanced_options,
+                self.loading_indicator,
                 self.results_view
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,

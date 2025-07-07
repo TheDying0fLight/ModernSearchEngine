@@ -1,5 +1,6 @@
 import flet as ft
-from .components import ResultContainer
+from .components import ResultContainer, EmptyState
+from .tab import TabTitle
 
 
 class ResultCard(ResultContainer):
@@ -51,11 +52,17 @@ class ResultsView(ft.Container):
         )
 
     def show_results(self, query, results):
-        if not results or len(results) == 0:
-            title = ResultViewTitle(f"No results found")
-            results_component = NoResultsPage(query)
+        if (not results) or len(results) == 0:
+            self.content = results_component = EmptyState(
+                icon=ft.Icons.SEARCH_OFF,
+                title="No results found",
+                text=f"No documents found for '{query}' \n Try different search terms or check your spelling",
+                button_icon=ft.Icons.SEARCH,
+                button_text="Try Searching again",
+                on_button_click= lambda e: None,
+            )
         else:
-            title = ResultViewTitle(f"Search results for '{query}' ({len(results)} result{'s' if len(results) != 1 else ''})")
+            title = TabTitle(f"Search results for '{query}' ({len(results)} result{'s' if len(results) != 1 else ''})")
             results_component = ft.Column([
                 ResultCard(
                     result_data=result,
@@ -64,46 +71,10 @@ class ResultsView(ft.Container):
                 ) for result in results],
                 scroll=ft.ScrollMode.AUTO,
                 spacing=0)
-        self.content = ft.Column([title, results_component])
+            self.content = ft.Column([title, results_component])
         self.visible = True
         self.update()
 
     def hide_results(self):
         self.visible = False
         self.update()
-
-class ResultViewTitle(ft.Container):
-    def __init__(self, text):
-        super().__init__(
-            content=ft.Text(
-                text,
-                size=20,
-                weight=ft.FontWeight.BOLD,
-                color=ft.Colors.BLUE_800
-            ),
-            margin=ft.margin.only(bottom=20)
-        )
-
-class NoResultsPage(ft.Container):
-    def __init__(self, query):
-        super().__init__(
-            content=ft.Column([
-                ft.Icon(ft.Icons.SEARCH_OFF, size=64, color=ft.Colors.GREY_400),
-                ft.Text(
-                    f"No documents found for '{query}' \n Try different search terms or check your spelling",
-                    size=14,
-                    color=ft.Colors.GREY_500,
-                    text_align=ft.TextAlign.CENTER
-                ),
-            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=15),
-            padding=50,
-            alignment=ft.alignment.center,
-            bgcolor=ft.Colors.WHITE,
-            border_radius=10,
-            shadow=ft.BoxShadow(
-                spread_radius=0,
-                blur_radius=4,
-                color=ft.Colors.GREY_200,
-                offset=ft.Offset(0, 2)
-            )
-        )
