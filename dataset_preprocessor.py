@@ -58,7 +58,7 @@ class MSMBertDatasetPreprocessor(DatasetPreprocessor):
             max_processed_idx = 0
         # encode passages
         with torch.no_grad(): #this preprocessing is static and not used for fine tuning, so no_grad saves resources
-            passage_embeddings = self.bert_encode(passages[max_processed_idx:], checkpoint_save=True, last_saved_embedding=max_processed_idx)
+            passage_embeddings = self.bert_encode(passages[max_processed_idx:], checkpoint_save=10, last_saved_embedding=max_processed_idx)
         torch.save(passage_embeddings, f"{self.result_path}{self.prefix}passage_embeddings.pt")
 
         # get query encodings and save them
@@ -133,15 +133,15 @@ class MSMBertDatasetPreprocessor(DatasetPreprocessor):
             # monitoring print
             if verbose:
                 print(f"Remaining time: \t \t {round(remaining_batches*(sum(batch_times)/len(batch_times))/60, 3)} min")
-                print(f"Completion percentage: \t \t {round((100*len(all_embeddings)*all_embeddings[0].shape[0]/len(text)), 3)}%")
+                print(f"Completion percentage: \t \t {round((100*len(all_embeddings)*all_embeddings[0].shape[0]/len(text)), 3)}%") # currently broken
                 print(f"Memory used: \t \t \t {round(mem_used, 4)}GB")
                 print(f"Projected total memory use: \t {round(total_batches*mem_used/completed_batches, 4)}GB")
 
             if checkpoint_save > 0 and completed_batches%checkpoint_save == 0: # save every checkpoint_save batches
                 all_embeddings = torch.cat(all_embeddings, dim=0)
-                torch.save(all_embeddings, f"{self.result_path}{self.prefix}passage_embeddings_{last_saved_embedding}-{last_saved_embedding+batch_size}.pt")
+                torch.save(all_embeddings, f"{self.result_path}{self.prefix}passage_embeddings_{last_saved_embedding}-{last_saved_embedding+batch_size*batch_times}.pt")
                 all_embeddings = [] #reset embedding buffer to free up space
-                last_saved_embedding += batch_size
+                last_saved_embedding += batch_size*checkpoint_save
 
         return all_embeddings 
 

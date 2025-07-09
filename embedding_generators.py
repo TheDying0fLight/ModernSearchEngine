@@ -46,3 +46,4 @@ class Word2VecEmbedder(): #getting ahold of word2vec weights seems surprisingly 
 
 class MpnetEmbedder(): # all-mpnet-base-v2 seems like exactly the type of embedder we need. However is this too close to a model specifically for retrieval? Its explicitly made for semantic search among other things.
     pass
+
