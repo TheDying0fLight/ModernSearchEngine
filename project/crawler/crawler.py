@@ -2,7 +2,8 @@ import logging
 import random
 import requests
 from urllib.parse import urljoin, urlparse
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+import warnings
 from collections import defaultdict
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +22,8 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
     level=logging.INFO
 )
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
 
 default_user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -126,16 +129,15 @@ class Crawler:
             elif href.startswith('http'): yield href
 
     def is_useragent_allowed(self, url: str):
-        domain = urlparse(url).hostname
-        path = urlparse(url).path
-        url = url.removesuffix(path)
+        parse = urlparse(url)
+        domain = parse.hostname
+        path = parse.path
+        url = f"{parse.scheme}://{parse.netloc}"
         with self.domain_lock:
             try: return self.domain_dict[domain]['robot']('*', path)
             except: pass
             robot = urobot.RobotFileParser()
-            print(url)
             robot.set_url(url + "/robots.txt")
-            # robot.read()
             p = multiprocessing.Process(target=robot.read)
             p.start()
             p.join(1)
@@ -156,7 +158,7 @@ class Crawler:
             elif url not in self.urls_to_visit:
                 self.urls_to_visit.add(url)
                 added += 1
-        logging.info(f"Assumed non english: {language_denied}")
+        if language_denied: logging.info(f"Assumed non english: {language_denied}")
         return added
 
     def is_english(self, html):
@@ -192,12 +194,13 @@ class Crawler:
             with self.visit_lock:
                 logging.info(
                     f"Visited {len(self.visited_pages) + 1} pages (english={english}, kws_found={keywords_found}, URL: {url})")
-                self.visited_pages[url] = {
-                    'keywords_found': keywords_found,
-                    'is_english': english,
-                }
-            with self.domain_lock:
-                self.domain_dict[urlparse(url).hostname]['in_use'] = False
+        with self.visit_lock:
+            self.visited_pages[url] = {
+                'keywords_found': keywords_found,
+                'is_english': english,
+            }
+        with self.domain_lock:
+            self.domain_dict[urlparse(url).hostname]['in_use'] = False
 
     def run(self, amount: int = None):
         start_url_amt = len(self.visited_pages)
