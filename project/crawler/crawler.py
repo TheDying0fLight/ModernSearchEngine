@@ -53,7 +53,6 @@ class Crawler:
         self.urls_to_visit = set(urls)
         self.proxy_manager = ProxyManager(max_workers=max_workers, verbose=False) if use_proxies else None
         self.allowed_lang_prefixes = ['en']
-        self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
         self.domain_lock = threading.Lock()
         self.visit_lock = threading.Lock()
         self.domain_dict = defaultdict(lambda: defaultdict(str))
@@ -123,7 +122,6 @@ class Crawler:
     def get_linked_urls(self, url: str, html: str):
         soup = BeautifulSoup(html, 'html.parser')
         for link in soup.find_all('a', href=True):
-            if any(map(lambda x: x in link, self.filtered_substrings)): continue
             href = link['href']
             if href.startswith('/'): href = yield urljoin(url, href)
             elif href.startswith('http'): yield href
