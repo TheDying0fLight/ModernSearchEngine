@@ -2,7 +2,6 @@ import time
 from dataclasses import dataclass, field
 import hashlib
 from typing import List, Dict, Set, Optional, Any
-from datetime import datetime
 from urllib.parse import urlparse
 import logging
 import json
@@ -14,30 +13,16 @@ class Document:
     url: str
     title: str = ""
     content_hash: str = field(default="", init=False)
-    
+
+    html: str = ""
     content: str = ""
     meta_description: str = ""
-    meta_keywords: str = ""
-    h1_tags: List[str] = field(default_factory=list)
-    h2_tags: List[str] = field(default_factory=list)
-    h3_tags: List[str] = field(default_factory=list)
 
     crawl_timestamp: float = field(default_factory=time.time)
-    crawler_relevance_score: float = 0.0
-    keywords_found: List[str] = field(default_factory=list)
-    keyword_density: Dict[str, float] = field(default_factory=dict)
 
     word_count: int = 0
-    content_to_html_ratio: float = 0.0
     sentence_count: int = 0
     paragraph_count: int = 0
-    has_ssl: bool = False
-
-    incoming_links: Set[str] = field(default_factory=set)
-    outbound_links: Set[str] = field(default_factory=set)
-
-    page_size_bytes: int = 0
-    load_time_ms: float = 0.0
     status_code: int = 200
     canonical_url: str = ""
 
@@ -48,15 +33,11 @@ class Document:
 
     language: str = "en"
     country_code: str = ""
-
-    last_modified: Optional[datetime] = None
-    last_crawled: datetime = field(default_factory=datetime.now)
     crawl_frequency: int = 0  # number of times crawled
 
 
 
     def __post_init__(self):
-
         parsed_url = urlparse(self.url)
         url_parts = self.get_url_parts()
 
@@ -66,17 +47,19 @@ class Document:
         self.canonical_url = self.canonical_url or self.url
         self.has_ssl = parsed_url.scheme == 'https'
 
-        if self.content:
+        if self.html:
+            self.update_metrics()
             self.content_hash = hashlib.md5(self.content.encode()).hexdigest()
 
 
-    def update_metrics(self, html: str):
-        soup = BeautifulSoup(html, 'html.parser')
+    def update_metrics(self):
+        soup = BeautifulSoup(self.html, 'html.parser')
         text = soup.get_text(separator=' ', strip=True)
         self.content = text
+        self.title = soup.title.string if soup.title and soup.title.string else ""
         self.word_count = len(self.content.split())
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
-        self.paragraph_count = html.count('<p>')
+        self.paragraph_count = self.html.count('<p>')
 
 
     def is_duplicate(self, other: 'Document') -> bool:
@@ -93,6 +76,13 @@ class Document:
         }
 
     
+    def append_to_file(self, file_path: str):
+        """ Append this document to a JSONL file."""
+        with open(file_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(self.to_dict()) + "\n")
+        logging.info(f"Document {self.url} appended to {file_path}")
+
+
     def load_from_dict(self, data: Dict):
         for key, value in data.items():
             if hasattr(self, key):
@@ -101,6 +91,7 @@ class Document:
         # Recalculate derived fields
         self.__post_init__()
     
+
     def to_dict(self) -> Dict:
         return {
             "url": self.url,
@@ -108,22 +99,11 @@ class Document:
             "content_hash": self.content_hash,
             "content": self.content,
             "meta_description": self.meta_description,
-            "meta_keywords": self.meta_keywords,
-            "h1_tags": self.h1_tags,
-            "h2_tags": self.h2_tags,
-            "h3_tags": self.h3_tags,
             "crawl_timestamp": self.crawl_timestamp,
-            "crawler_relevance_score": self.crawler_relevance_score,
-            "keywords_found": self.keywords_found,
-            "keyword_density": self.keyword_density,
             "word_count": self.word_count,
-            "content_to_html_ratio": self.content_to_html_ratio,
             "sentence_count": self.sentence_count,
             "paragraph_count": self.paragraph_count,
             "has_ssl": self.has_ssl,
-            "outbound_links": list(self.outbound_links),
-            "page_size_bytes": self.page_size_bytes,
-            "load_time_ms": self.load_time_ms,
             "status_code": self.status_code,
             "canonical_url": self.canonical_url,
             "domain": self.domain,
@@ -131,10 +111,9 @@ class Document:
             "path_depth": self.path_depth,
             "language": self.language,
             "country_code": self.country_code,
-            "last_modified": str(self.last_modified) if self.last_modified else None,
-            "last_crawled": str(self.last_crawled),
             "crawl_frequency": self.crawl_frequency
         }
+
 
 
 class DocumentCollection:
@@ -165,23 +144,32 @@ class DocumentCollection:
         return True
     
 
+    def add_document_and_save(self, doc: Document, file_path: str) -> bool:
+        """ Add document to collection with duplicate checking, then append to file if successful."""
+        if self.add_document(doc):
+            doc.append_to_file(file_path)
+            return True
+        return False
+
+
     def write_collection_to_file(self, file_path: str):
         """ Save the document collection to a file in JSONL format, one document per line."""
-        for url, doc in self.documents.items():
-
-            with open(file_path, 'a', encoding='utf-8') as f:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            for url, doc in self.documents.items():
                 f.write(json.dumps(doc.to_dict()) + "\n")
-            logging.info(f"Document {url} saved to {file_path}")
+        logging.info(f"Saved {len(self.documents)} documents to {file_path}")
 
 
     def load_collection_from_file(self, file_path: str):
         """ Load the document collection from a file in JSONL format, one document per line."""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                docs_data = json.load(f)
-                for doc_data in docs_data:
-                    doc = Document(**doc_data)
-                    self.add_document(doc)
+                for line in f:
+                    line = line.strip()
+                    if line:  # Skip empty lines
+                        doc_data = json.loads(line)
+                        doc = Document(**doc_data)
+                        self.add_document(doc)
             logging.info(f"Loaded {len(self.documents)} documents from {file_path}")
         except Exception as e:
             logging.error(f"Failed to load document collection from {file_path}: {e}")

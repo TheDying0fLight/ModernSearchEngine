@@ -3,7 +3,7 @@ import random
 import requests
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
-from collections import deque
+# from collections import deque
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -31,9 +31,8 @@ default_user_agents = [
 class Crawler:
     def __init__(self, urls=None, max_workers=multiprocessing.cpu_count()//2, keywords=None, user_agents=None):
         self.visited_pages = {}
-        # Initialize as a list of (priority, url) tuples for heap operations
-        # Lower priority values = higher priority (processed first)
-        initial_urls = [(0, url) for url in (urls or [])]  # Default priority 0
+        # initialize as a list of (priority, url) tuples for heap operations
+        initial_urls = [(0, url) for url in (urls or [])]  # default priority 0
         self.urls_to_visit = initial_urls
         heapq.heapify(self.urls_to_visit)
         self.proxy_manager = ProxyManager(max_workers=max_workers)
@@ -46,10 +45,60 @@ class Crawler:
         self.domain_last_access = {}
         self.domain_lock = threading.Lock()
         self.user_agents = user_agents or default_user_agents
-        # Initialize document collection
-        # This will hold the documents crawled by this instance
+        # initialize document collection
         self.doc_collection = DocumentCollection()
-        self.write_frequency = 10  # Write to file every 10 documents
+        self.write_frequency = 10  # write to file every 10 documents
+        self.output_file = None
+        self.pending_docs = []  # cache for documents waiting to be written
+        self.write_lock = threading.Lock()  # lock for thread-safe document write operations
+
+
+
+    def add_document_to_cache(self, doc: Document):
+        """Thread-safe method to add document to cache and handle batch writing."""
+        with self.write_lock:
+            # try to add to collection
+            if self.doc_collection.add_document(doc):
+                self.pending_docs.append(doc)
+                logging.info(f"Added document {doc.url} to cache. Cache size: {len(self.pending_docs)}")
+                
+                # if write frequency reached, write to file
+                if len(self.pending_docs) >= self.write_frequency:
+                    self._write_pending_docs()
+
+
+
+    def _write_pending_docs(self):
+        """Write pending documents to file. Must be called with write_lock held."""
+        if not self.pending_docs or not self.output_file:
+            return
+            
+        try:
+            # append all pending docs to file
+            for doc in self.pending_docs:
+                self.doc_collection.add_document_and_save(doc, self.output_file)
+
+            logging.info(f"Appended {len(self.pending_docs)} documents to {self.output_file}")
+            self.pending_docs.clear()
+        except Exception as e:
+            logging.error(f"Failed to write documents to file: {e}")
+
+
+
+    def finalize_crawl(self, backup: bool = True):
+        """Write any remaining documents and save final collection."""
+        with self.write_lock:
+            # append any remaining pending documents
+            if self.pending_docs:
+                self._write_pending_docs()
+            
+            # save entire collection as backup
+            if self.output_file and self.doc_collection.documents and backup:
+                backup_file = self.output_file.replace('.jsonl', '_complete.jsonl')
+                self.doc_collection.write_collection_to_file(backup_file)
+                logging.info(f"Saved backup collection to {backup_file}")
+
+
 
     def get_random_headers(self):
         return {
@@ -57,10 +106,14 @@ class Crawler:
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         }
 
+
+
     def is_captcha_page(self, html):
         markers = ['captcha', 'g-recaptcha', 'hcaptcha', 'confirm this search was made by a human']
         text = BeautifulSoup(html, 'html.parser').get_text(separator=' ').lower()
         return any(m in text for m in markers)
+
+
 
     def download_sitehtml(self, url):
         last_exc = None
@@ -108,6 +161,8 @@ class Crawler:
         else:
             raise Exception(f"No proxies available to crawl {url}")
 
+
+
     def get_linked_urls(self, url, html):
         soup = BeautifulSoup(html, 'html.parser')
         for link in soup.find_all('a', href=True):
@@ -122,6 +177,8 @@ class Crawler:
             if any(host.startswith(p) for p in self.allowed_prefixes):
                 yield href
 
+
+
     def add_url_to_visit(self, url, priority=1):
         """Add URL to visit with given priority. Lower values = higher priority."""
         with self.lock:
@@ -132,6 +189,8 @@ class Crawler:
                 if url not in existing_urls:
                     heapq.heappush(self.urls_to_visit, (priority, url))
 
+
+
     def is_english(self, html):
         text = BeautifulSoup(html, 'html.parser').get_text(separator=' ')
         try:
@@ -141,11 +200,17 @@ class Crawler:
             logging.info("Language detection failed, assuming English")
             return True
 
+
+
     def crawl(self, url):
         keywords_found = False
         english = False
+        # start_time = time.time()
+        
         try:
             html = self.download_sitehtml(url)
+            # load_time_ms = (time.time() - start_time) * 1000
+            
             english = self.is_english(html)
             if not english:
                 logging.info(f"Page {url} skipped: not detected as English.")
@@ -153,12 +218,26 @@ class Crawler:
             
             text_lower = html.lower()
             keywords_found = any(kw in text_lower for kw in self.keywords)
-            self.doc_collection.add_document(Document(url=url))
+            
+            # initialize Document object
+            doc = Document(url=url)
+            doc.html = html  # store raw HTML
+                        
+            # update metrics using the stored HTML
+            doc.update_metrics()
+            
+            # add document to cache
+            self.add_document_to_cache(doc)
+            
+            # If keywords found, add linked URLs for further crawling
             if keywords_found:
                 for linked_url in set(self.get_linked_urls(url, html)):
                     self.add_url_to_visit(linked_url, priority=1)
             else:
-                logging.info(f"Page {url} skipped: no keywords found.")
+                logging.info(f"Page {url} skipped for link extraction: no keywords found.")
+                
+        except Exception as e:
+            logging.error(f"Error crawling {url}: {e}")
         finally:
             with self.lock:
                 self.visited_pages[url] = {
@@ -167,26 +246,41 @@ class Crawler:
                 }
                 logging.info(f"Visited {len(self.visited_pages)} pages (Visited {url}, english={english}, keywords_found={keywords_found})")
 
-    def run(self, amount=None):
+    def run(self, amount=None, output_file="crawled_documents.jsonl"):
         """Run the crawler, processing URLs in priority order."""
+        self.output_file = output_file
         # start_url_amt = len(self.visited_pages)
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = set()
-            while True:
-                with self.lock:
-                    while len(futures) < self.max_workers and self.urls_to_visit:
-                        priority, next_url = heapq.heappop(self.urls_to_visit)
-                        if next_url not in self.visited_pages:
-                            futures.add(executor.submit(self.crawl, next_url))
-                if not futures: break
-                if amount is not None and len(self.visited_pages) >= amount: break
-                done, futures = set(as_completed(futures)), set()
-                for future in done:
-                    try:
-                        future.result()
-                    except Exception:
-                        pass
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = set()
+                while True:
+                    with self.lock:
+                        while len(futures) < self.max_workers and self.urls_to_visit:
+                            priority, next_url = heapq.heappop(self.urls_to_visit)
+                            if next_url not in self.visited_pages:
+                                futures.add(executor.submit(self.crawl, next_url))
+                    if not futures: break
+                    if amount is not None and len(self.visited_pages) >= amount: break
+                    done, futures = set(as_completed(futures)), set()
+                    for future in done:
+                        try:
+                            future.result()
+                        except Exception:
+                            pass
+        finally:
+            # finalize the crawl to save any remaining documents in the cache
+            self.finalize_crawl()
         logging.info("Crawling complete.")
+
+    def get_crawling_stats(self):
+        """Get statistics about the crawling session."""
+        with self.write_lock:
+            return {
+                'total_documents': len(self.doc_collection.documents),
+                'pending_documents': len(self.pending_docs),
+                'visited_pages': len(self.visited_pages),
+                'urls_to_visit': len(self.urls_to_visit)
+            }
 
 def test_url(url):
     resp = requests.get(url, timeout=10)
