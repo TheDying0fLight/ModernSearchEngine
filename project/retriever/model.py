@@ -8,7 +8,7 @@ from transformers.models.clip.modeling_clip import clip_loss
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class RetrieverModel(nn.Module):
-    def __init__(self, model_name="rasyosef/SPLADE-BERT-Mini", loss_type="siglip"):
+    def __init__(self, model_name="prajjwal1/bert-mini", loss_type="siglip"):
         super().__init__()
         self.model_name = model_name
         self.loss_type = loss_type
