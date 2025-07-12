@@ -83,7 +83,7 @@ class Crawler:
             last_time = self.domain_dict[domain]['last_access']
             if last_time:
                 now = time.time()
-                delay = random.uniform(1, 3)
+                delay = random.uniform(5, 7)
                 wait_time = last_time + delay - now
                 if wait_time > 0: time.sleep(wait_time)
         with self.domain_lock:
@@ -152,15 +152,17 @@ class Crawler:
         added = 0
         language_denied = []
         for url in set(urls):
-            if url in self.visited_pages: continue
+            with self.visit_lock:
+                if url in self.visited_pages: continue
             if not validators.url(url): continue
             if predict_language_from_url(url) not in ["und", "en"]:
                 language_denied.append(url)
                 continue
             if not self.is_useragent_allowed(url): continue
-            elif url not in self.urls_to_visit:
+            with self.visit_lock:
+                if url in self.urls_to_visit: continue
                 self.urls_to_visit.add(url)
-                added += 1
+            added += 1
         if language_denied: logging.info(f"Assumed non english: {language_denied}")
         return added
 
@@ -186,9 +188,9 @@ class Crawler:
             if not english: raise BaseException
             keywords_found = any(re.search(regex, html.lower()) for regex in self.keywords)
             if keywords_found:
+                to_add = set(self.get_linked_urls(url, html))
+                added = self.add_urls_to_visit(to_add)
                 with self.visit_lock:
-                    to_add = set(self.get_linked_urls(url, html))
-                    added = self.add_urls_to_visit(to_add)
                     logging.info(f"Frontier size: {len(self.urls_to_visit)}, "
                                  f"Added {added}/{len(to_add)} URLs from {url} to the frontier")
                     with open(self.out_path, "a") as f:
@@ -228,7 +230,7 @@ class Crawler:
                         futures.add((executor.submit(self.crawl, next_url), time.time()))
                 if not futures: break
                 # wait x seconds to start more workers
-                time.sleep(5)
+                time.sleep(2)
                 now = time.time()
-                futures.difference_update(set(filter(lambda f: f[0].done() or now - f[1] > 30, futures)))
+                futures.difference_update(set(filter(lambda f: f[0].done() or now - f[1] > 60, futures)))
         logging.info("Crawling complete.")
