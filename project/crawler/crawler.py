@@ -17,16 +17,16 @@ import validators
 import re
 import json
 import os
-import random
+import socket
 
 from .utils import predict_language_from_url, uniquify
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
-    level=logging.INFO
+    level=logging.DEBUG
 )
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
-
+socket.setdefaulttimeout(2)
 
 default_user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -136,17 +136,19 @@ class Crawler:
         parse = urlparse(url)
         domain = parse.hostname
         path = parse.path
-        url = f"{parse.scheme}://{parse.netloc}"
+        base_url = f"{parse.scheme}://{parse.netloc}"
+
         with self.domain_lock:
-            try: return self.domain_dict[domain]['robot']('*', path)
-            except: pass
-            robot = urobot.RobotFileParser()
-            robot.set_url(url + "/robots.txt")
-            p = multiprocessing.Process(target=robot.read)
-            p.start()
-            p.join(1)
-            if p.is_alive: self.domain_dict[domain]['robot'] = (lambda x, y: True)
-            else: self.domain_dict[domain]['robot'] = robot.can_fetch
+            entry = self.domain_dict[domain]
+            if 'robot' in entry: return entry['robot']('*', path)
+
+        robot = urobot.RobotFileParser()
+        robot.set_url(base_url + "/robots.txt")
+        robot.read()
+
+        with self.domain_lock:
+            # entry['robot'] = lambda *args, **kwargs: True
+            self.domain_dict[domain]['robot'] = robot.can_fetch
             return self.domain_dict[domain]['robot']('*', path)
 
     def add_urls_to_visit(self, urls: list[str]):
