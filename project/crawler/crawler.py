@@ -17,6 +17,7 @@ import validators
 import re
 import json
 import os
+import random
 
 from .utils import predict_language_from_url, uniquify
 
@@ -197,15 +198,14 @@ class Crawler:
                         f.write(json.dumps({"url": url, "html": html}))
         except Exception as e:
             logging.warning(f"Crawler error: {e}")
-        finally:
-            with self.visit_lock:
-                logging.info(
-                    f"Visited {len(self.visited_pages) + 1} pages (english={english}, kws_found={keywords_found}, URL: {url})")
         with self.visit_lock:
             self.visited_pages[url] = {
                 'keywords_found': keywords_found,
                 'is_english': english,
             }
+            logging.info(
+                f"Visited {len(self.visited_pages)} pages (english={english}, kws_found={keywords_found}, URL: {url})")
+
         with self.domain_lock:
             self.domain_dict[urlparse(url).hostname]['in_use'] = False
 
@@ -216,21 +216,24 @@ class Crawler:
             while True:
                 with self.visit_lock:
                     if amount is not None and len(self.visited_pages) - start_url_amt >= amount: break
-                    urls = self.urls_to_visit.copy()
-                    for next_url in urls:
-                        if not len(futures) < self.max_workers: break
+                    urls = list(self.urls_to_visit.copy())
+                random.shuffle(urls)
+                for next_url in urls:
+                    if not len(futures) < self.max_workers: break
+                    with self.visit_lock:
                         if next_url in self.visited_pages:
                             self.urls_to_visit.remove(next_url)
                             continue
-                        domain = urlparse(next_url).hostname
-                        with self.domain_lock:
-                            if self.domain_dict[domain].get('in_use'): continue
-                            self.domain_dict[domain]['in_use'] = True
-                        self.urls_to_visit.remove(next_url)
-                        futures.add((executor.submit(self.crawl, next_url), time.time()))
+                    domain = urlparse(next_url).hostname
+                    with self.domain_lock:
+                        if self.domain_dict[domain].get('in_use'): continue
+                        self.domain_dict[domain]['in_use'] = True
+                    with self.visit_lock: self.urls_to_visit.remove(next_url)
+                    futures.add((executor.submit(self.crawl, next_url), time.time()))
                 if not futures: break
                 # wait x seconds to start more workers
                 time.sleep(2)
                 now = time.time()
                 futures.difference_update(set(filter(lambda f: f[0].done() or now - f[1] > 60, futures)))
+                logging.debug(f"Active threads {len(executor._threads)}")
         logging.info("Crawling complete.")
