@@ -11,6 +11,7 @@ txt_urls = [
     "https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/proxies.txt",
 ]
 
+
 class ProxyManager:
     def __init__(
         self,

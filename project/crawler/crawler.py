@@ -15,8 +15,10 @@ from langcodes import Language
 import urllib.robotparser as urobot
 import validators
 import re
+import json
+import os
 
-from .utils import predict_language_from_url
+from .utils import predict_language_from_url, uniquify
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
@@ -42,12 +44,15 @@ class Crawler:
                  keywords: list = [r't\S+bingen'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = True,
-                 verbose: bool = False):
+                 verbose: bool = False,
+                 out_path: str = "data/crawled.jsonl"):
         self.verbose = verbose
         self.use_proxies = use_proxies
         self.keywords = keywords
         self.user_agents = user_agents
         self.max_workers = max_workers
+        self.out_path = uniquify(out_path)
+        os.makedirs(os.path.dirname(self.out_path), exist_ok=True)
 
         self.visited_pages = {}
         self.urls_to_visit = set(urls)
@@ -139,7 +144,7 @@ class Crawler:
             p = multiprocessing.Process(target=robot.read)
             p.start()
             p.join(1)
-            if p.is_alive:self.domain_dict[domain]['robot'] = (lambda x, y: True)
+            if p.is_alive: self.domain_dict[domain]['robot'] = (lambda x, y: True)
             else: self.domain_dict[domain]['robot'] = robot.can_fetch
             return self.domain_dict[domain]['robot']('*', path)
 
@@ -184,8 +189,10 @@ class Crawler:
                 with self.visit_lock:
                     to_add = set(self.get_linked_urls(url, html))
                     added = self.add_urls_to_visit(to_add)
-                    logging.info(f"Frontier size: {len(self.urls_to_visit)}, " \
+                    logging.info(f"Frontier size: {len(self.urls_to_visit)}, "
                                  f"Added {added}/{len(to_add)} URLs from {url} to the frontier")
+                    with open(self.out_path, "a") as f:
+                        f.write(json.dumps({"url": url, "html": html}))
         except Exception as e:
             logging.warning(f"Crawler error: {e}")
         finally:

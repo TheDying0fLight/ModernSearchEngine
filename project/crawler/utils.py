@@ -2,11 +2,13 @@ import re
 from urllib.parse import urlparse
 import tldextract
 from langcodes import Language
+import os
 
 _CC_TLD_RE = re.compile(r'^[a-z]{2,3}$', re.IGNORECASE)
 _GENERIC_TLDS = {
     "com", "org", "net", "edu", "gov", "io", "info", "biz", "co", "uk"
 }
+
 
 def predict_language_from_url(url: str) -> str:
     parsed = urlparse(url)
@@ -38,4 +40,17 @@ def predict_language_from_url(url: str) -> str:
         tag = normalize(suffix)
         if tag: return tag
 
+    # else undefined
     return 'und'
+
+
+# https://stackoverflow.com/questions/13852700/create-file-but-if-name-exists-add-number
+def uniquify(path):
+    filename, extension = os.path.splitext(path)
+    counter = 1
+
+    while os.path.exists(path):
+        path = filename + " (" + str(counter) + ")" + extension
+        counter += 1
+
+    return path
