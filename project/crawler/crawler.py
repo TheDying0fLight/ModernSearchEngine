@@ -81,11 +81,11 @@ class Crawler:
 
         with self.domain_lock:
             last_time = self.domain_dict[domain]['last_access']
-            if last_time:
-                now = time.time()
-                delay = random.uniform(5, 7)
-                wait_time = last_time + delay - now
-                if wait_time > 0: time.sleep(wait_time)
+        if last_time:
+            now = time.time()
+            delay = random.uniform(5, 7)
+            wait_time = last_time + delay - now
+            if wait_time > 0: time.sleep(wait_time)
         with self.domain_lock:
             self.domain_dict[domain]['last_access'] = time.time()
 
