@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import warnings
 from collections import defaultdict
 import time
-from concurrent.futures import ThreadPoolExecutor
 import threading
 import multiprocessing
 from langdetect import detect, LangDetectException
@@ -19,11 +18,11 @@ import json
 import os
 import socket
 
-from .utils import predict_language_from_url, uniquify
+from .utils import predict_language_from_url, uniquify, TrackingThreadPoolExecutor
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
-    level=logging.DEBUG
+    level=logging.INFO
 )
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 socket.setdefaulttimeout(2)
@@ -55,13 +54,15 @@ class Crawler:
         self.out_path = uniquify(out_path)
         os.makedirs(os.path.dirname(self.out_path), exist_ok=True)
 
-        self.visited_pages = {}
-        self.urls_to_visit = set(urls)
         self.proxy_manager = ProxyManager(max_workers=max_workers, verbose=False) if use_proxies else None
         self.allowed_lang_prefixes = ['en']
         self.domain_lock = threading.Lock()
         self.visit_lock = threading.Lock()
+        self.json_lock = threading.Lock()
         self.domain_dict = defaultdict(lambda: defaultdict(str))
+
+        self.visited_pages = {}
+        self.urls_to_visit = set(urls)
 
     def get_random_headers(self):
         return {
@@ -195,7 +196,8 @@ class Crawler:
                 added = self.add_urls_to_visit(to_add)
                 with self.visit_lock:
                     logging.info(f"Frontier size: {len(self.urls_to_visit)}, "
-                                 f"Added {added}/{len(to_add)} URLs from {url} to the frontier")
+                                 f"Added {added}/{len(to_add)} URLs from {url}")
+                with self.json_lock:
                     with open(self.out_path, "a") as f:
                         f.write(json.dumps({"url": url, "html": html}))
         except Exception as e:
@@ -205,7 +207,7 @@ class Crawler:
                 'keywords_found': keywords_found,
                 'is_english': english,
             }
-            logging.info(
+            logging.debug(
                 f"Visited {len(self.visited_pages)} pages (english={english}, kws_found={keywords_found}, URL: {url})")
 
         with self.domain_lock:
@@ -213,15 +215,13 @@ class Crawler:
 
     def run(self, amount: int = None):
         start_url_amt = len(self.visited_pages)
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
             while True:
                 with self.visit_lock:
                     if amount is not None and len(self.visited_pages) - start_url_amt >= amount: break
-                    urls = list(self.urls_to_visit.copy())
-                random.shuffle(urls)
+                    urls = self.urls_to_visit.copy()
                 for next_url in urls:
-                    if not len(futures) < self.max_workers: break
                     with self.visit_lock:
                         if next_url in self.visited_pages:
                             self.urls_to_visit.remove(next_url)
@@ -237,5 +237,6 @@ class Crawler:
                 time.sleep(2)
                 now = time.time()
                 futures.difference_update(set(filter(lambda f: f[0].done() or now - f[1] > 60, futures)))
-                logging.debug(f"Active threads {len(executor._threads)}")
+                with self.visit_lock:
+                    logging.info(f"Active threads: {executor.active_count}, Visited: {len(self.visited_pages)}")
         logging.info("Crawling complete.")

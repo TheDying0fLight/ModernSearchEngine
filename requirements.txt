@@ -107,8 +107,6 @@ tiktoken
 tldextract
 tokenizers
 tomli
-torch
-torchvision
 tornado
 tqdm
 traitlets
