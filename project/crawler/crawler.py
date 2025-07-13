@@ -93,7 +93,7 @@ class Crawler:
 
         if not self.use_proxies:
             try:
-                resp = request_fn(url, headers=self.get_random_headers(), timeout=10)
+                resp = request_fn(url, headers=self.get_random_headers(), timeout=3)
                 resp.raise_for_status()
                 return resp
             except Exception as e:
@@ -108,7 +108,7 @@ class Crawler:
             headers_only = self.get_random_headers()
             start = time.time()
             try:
-                resp = request_fn(url, proxies=proxies, headers=headers_only, timeout=10)
+                resp = request_fn(url, proxies=proxies, headers=headers_only, timeout=3)
                 elapsed = time.time() - start
                 if 400 <= resp.status_code < 600:
                     logging.info(f"Received {resp.status_code} for {url} via {proxy_url}, stopping retries.")
@@ -158,14 +158,13 @@ class Crawler:
         for url in set(urls):
             with self.visit_lock:
                 if url in self.visited_pages: continue
+                if url in self.urls_to_visit: continue
             if not validators.url(url): continue
             if predict_language_from_url(url) not in ["und", "en"]:
                 language_denied.append(url)
                 continue
             if not self.is_useragent_allowed(url): continue
-            with self.visit_lock:
-                if url in self.urls_to_visit: continue
-                self.urls_to_visit.add(url)
+            with self.visit_lock: self.urls_to_visit.add(url)
             added += 1
         if language_denied: logging.info(f"Assumed non english: {language_denied}")
         return added
@@ -220,7 +219,8 @@ class Crawler:
             while True:
                 with self.visit_lock:
                     if amount is not None and len(self.visited_pages) - start_url_amt >= amount: break
-                    urls = self.urls_to_visit.copy()
+                    urls = list(self.urls_to_visit.copy())
+                random.shuffle(urls)
                 for next_url in urls:
                     with self.visit_lock:
                         if next_url in self.visited_pages:
