@@ -125,3 +125,4 @@ wheel
 xxhash
 yarl
 zipp
+flet
