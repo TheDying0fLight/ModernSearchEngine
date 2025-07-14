@@ -172,6 +172,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
+/project/retriever/models
+/project/retriever/wandb
 # datasets folder
 ./datasets/
