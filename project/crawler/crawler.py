@@ -12,6 +12,11 @@ from langdetect import detect, LangDetectException
 from .proxy_manager import ProxyManager
 from .document import Document, DocumentCollection
 import heapq
+from collections import defaultdict
+from langcodes import Language
+import urllib.robotparser as urobot
+import validators
+import re
 
 
 logging.basicConfig(
@@ -29,22 +34,35 @@ default_user_agents = [
 ]
 
 class Crawler:
-    def __init__(self, urls=None, max_workers=multiprocessing.cpu_count()//2, keywords=None, user_agents=None):
-        self.visited_pages = {}
-        # initialize as a list of (priority, url) tuples for heap operations
-        initial_urls = [(0, url) for url in (urls or [])]  # default priority 0
-        self.urls_to_visit = initial_urls
-        heapq.heapify(self.urls_to_visit)
-        self.proxy_manager = ProxyManager(max_workers=max_workers)
-        self.lock = threading.Lock()
+    def __init__(self,
+                 urls: list,
+                 max_workers=multiprocessing.cpu_count()//2,
+                 keywords: list = [r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen'],
+                 user_agents:list=default_user_agents,
+                 use_proxies: bool = False,
+                 verbose: bool = True):
+        self.verbose = verbose
+        self.use_proxies = use_proxies
+        self.keywords = keywords
+        self.user_agents = user_agents
         self.max_workers = max_workers
-        self.keywords = [kw.lower() for kw in (keywords or ['tubingen', 'tübingen', 'tuebingen'])]
+
+
+        self.visited_pages = {}
+        initial_urls = [(0, url) for url in (urls or [])]  # default priority 0
+        self.frontier = initial_urls
+        heapq.heapify(self.frontier, ())
+        self.proxy_manager = ProxyManager(max_workers=max_workers, verbose=self.verbose) if use_proxies else None
+
+        self.lock = threading.Lock()
         # allowed hostname prefixes (e.g., language subdomains)
-        self.allowed_prefixes = ['www.', 'en.']
+        self.allowed_lang_prefixes = ['en.']
         self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
         self.domain_last_access = {}
         self.domain_lock = threading.Lock()
-        self.user_agents = user_agents or default_user_agents
+        self.visit_lock = threading.Lock()
+        self.domain_dict = defaultdict(lambda: defaultdict())
+
         # initialize document collection
         self.doc_collection = DocumentCollection()
         self.write_frequency = 10  # write to file every 10 documents
@@ -115,79 +133,122 @@ class Crawler:
 
 
 
-    def download_sitehtml(self, url):
+    def download_sitehtml(self, url, headers_only=False):
         last_exc = None
         attempt = 0
         domain = urlparse(url).hostname
+        request_fn = requests.head if headers_only else requests.get
 
         with self.domain_lock:
-            last_time = self.domain_last_access.get(domain)
-            now = time.time()
+            last_time = self.domain_dict[domain]['last_access']
             if last_time:
+                now = time.time()
                 delay = random.uniform(1, 3)
                 wait_time = last_time + delay - now
-                if wait_time > 0:
-                    time.sleep(wait_time)
+                if wait_time > 0: time.sleep(wait_time)
+        
+        with self.domain_lock:
             self.domain_last_access[domain] = time.time()
 
-        while self.proxy_manager.proxies:
-            attempt += 1
-            entry = self.proxy_manager.get_random_proxy()
-            proxy_url = entry['proxy']
-            proxies = {'http': proxy_url, 'https': proxy_url}
-            headers = self.get_random_headers()
-            start = time.time()
-            try:
-                resp = requests.get(url, proxies=proxies, headers=headers, timeout=10)
-                html = resp.text
-                elapsed = time.time() - start
-                if 400 <= resp.status_code < 600:
-                    logging.info(f"Received {resp.status_code} for {url} via {proxy_url}, stopping retries.")
-                    return resp.text
-                if self.is_captcha_page(html):
-                    logging.warning(f"Captcha detected for {url}, retrying after backoff.")
-                    time.sleep(random.uniform(5, 10))
-                    continue
-                resp.raise_for_status()
-                self.proxy_manager.update_proxy_quality(proxy_url, success=True, elapsed=elapsed)
-                return html
-            except Exception as e:
-                last_exc = e
-                self.proxy_manager.update_proxy_quality(proxy_url, success=False)
-                logging.warning(f"Proxy {proxy_url} failed on attempt {attempt}: {e}")
-        logging.error(f"All proxy attempts failed for {url}")
-        if last_exc:
-            raise last_exc
+        # use proxies if configured
+        if self.proxy_manager and self.use_proxies:
+            while self.proxy_manager.proxies:
+                attempt += 1
+                entry = self.proxy_manager.get_random_proxy()
+                proxy_url = entry['proxy']
+                proxies = {'http': proxy_url, 'https': proxy_url}
+                headers = self.get_random_headers()
+                start = time.time()
+                try:
+                    resp = requests.get(url, proxies=proxies, headers=headers, timeout=10)
+                    html = resp.text
+                    elapsed = time.time() - start
+                    if 400 <= resp.status_code < 600:
+                        logging.info(f"Received {resp.status_code} for {url} via {proxy_url}, stopping retries.")
+                        return resp.text
+                    if self.is_captcha_page(html):
+                        logging.warning(f"Captcha detected for {url}, retrying after backoff.")
+                        time.sleep(random.uniform(5, 10))
+                        continue
+                    resp.raise_for_status()
+                    self.proxy_manager.update_proxy_quality(proxy_url, success=True, elapsed=elapsed)
+                    return html
+                except Exception as e:
+                    last_exc = e
+                    self.proxy_manager.update_proxy_quality(proxy_url, success=False)
+                    logging.warning(f"Proxy {proxy_url} failed on attempt {attempt}: {e}")
+            logging.error(f"All proxy attempts failed for {url}")
+            if last_exc:
+                raise last_exc
+            else:
+                raise Exception(f"No proxies available to crawl {url}")
         else:
-            raise Exception(f"No proxies available to crawl {url}")
+            # direct request without proxies
+            try:
+                resp = request_fn(url, headers=self.get_random_headers(), timeout=10)
+                resp.raise_for_status()
+                return resp
+            except Exception as e:
+                logging.error(f"Direct request failed for {url}: {e}")
+                raise
 
 
 
     def get_linked_urls(self, url, html):
         soup = BeautifulSoup(html, 'html.parser')
         for link in soup.find_all('a', href=True):
-            if any(map(lambda x: x in link, self.filtered_substrings)): continue
             href = link['href']
-            if href.startswith('/'):
-                href = urljoin(url, href)
-            elif not href.startswith('http'):
-                continue
-            parsed = urlparse(href)
-            host = parsed.hostname or ''
-            if any(host.startswith(p) for p in self.allowed_prefixes):
-                yield href
+            if href.startswith('/'): href = yield urljoin(url, href)
+            elif href.startswith('http'): yield href
 
 
 
-    def add_url_to_visit(self, url, priority=1):
+    def relevance_score(self, url):
+        """Calculate relevance score based on URL and keywords."""
+        if not self.keywords:
+            return 0
+        
+        # simple scoring based on keyword presence
+        score = sum(1 for kw in self.keywords if re.search(kw, url, re.IGNORECASE))
+        
+        # additional scoring based on URL structure
+        parsed = urlparse(url)
+        if parsed.hostname:
+            score += 1
+
+
+
+
+    def add_url_to_frontier(self, url, priority=1):
         """Add URL to visit with given priority. Lower values = higher priority."""
+        added = 0
+        language_denied = []
         with self.lock:
-            # Check if URL is already visited
+            # check if URL is already visited
             if url not in self.visited_pages:
-                # Check if URL is not already in the heap
-                existing_urls = {item[1] for item in self.urls_to_visit}
+                # check if URL is not already in the heap
+                existing_urls = {item[1] for item in self.frontier}
                 if url not in existing_urls:
-                    heapq.heappush(self.urls_to_visit, (priority, url))
+                    heapq.heappush(self.frontier, (priority, url))
+
+
+
+    def is_useragent_allowed(self, url: str):
+        parse = urlparse(url)
+        domain = parse.hostname
+        path = parse.path
+        url = f"{parse.scheme}://{parse.netloc}"
+        with self.domain_lock:
+            try: return self.domain_dict[domain]['robot']('*', path)
+            except: pass
+            robot = urobot.RobotFileParser()
+            robot.set_url(url + "/robots.txt")
+            p = multiprocessing.Process(target=robot.read)
+            p.start()
+            p.join(1)
+            if p.is_alive:self.domain_dict[domain]['robot'] = (lambda x, y: True)
+            else: self.domain_dict[domain]['robot'] = robot.can_fetch
+            return self.domain_dict[domain]['robot']('*', path)
 
 
 

@@ -26,14 +26,19 @@ class Document:
     status_code: int = 200
     canonical_url: str = ""
 
-
+    parent_url: Optional[str] = None
     domain: str = field(default="", init=False)
     subdomain: str = field(default="", init=False)
     path_depth: int = field(default=0, init=False)
 
-    language: str = "en"
+    language: str = ""
     country_code: str = ""
     crawl_frequency: int = 0  # number of times crawled
+
+    embedding = None  # Placeholder for embedding, can be set later
+
+    relevant_keywords: list = [r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen']
+    relevance_score: float = 0.0
 
 
 
