@@ -1,3 +1,5 @@
+import math
+import torch
 
 # assume train dataset has the structure (query_id, document_id, relevant/not_relevant) for each row. (shape is dataset_size x 3)
 # assume test dataset has the structure (query_id, document_id, relevance_score)
@@ -24,21 +26,22 @@ class BertFinetuningPipeline():
                 batch_end = min(batch_end+self.batch_size)
                 batch = self.train_dataset[batch_start:batch_end]
                 gt_labels = batch[:,2]
-                documents = self.get_text(batch[:,1], self.documents)
-                queries = self.get_text(batch[:,0], self.queries)
+                documents = self.documents.get_text(batch[:,1])
+                queries = self.documents.get_text(batch[:,0])
                 predictions = self.model.predict_relevance(documents, queries)
                 loss = self.lossfunc(predictions, gt_labels)
                 loss.backward()
                 self.optimizer.step()
 
-    # TODO: code for loading the actual text of a query/document -> should probably use a proper database here
-    def get_text(self, text_ids, corpus):
-        pass
-
     # TODO: calculate and report NDCG with the gt relevancies
     def test(self):
-        for start_idx in range(0, len(self.test_dataset), 100):
+        ndcgs = []
+        discount_vector = torch.tensor([1/math.log(idx+1) for idx in range(0,100)])
+        for start_idx in range(0, len(self.test_dataset), 100): # load in chunks of 100, since rankings are in chunks of 100 per query. Careful, if something fucks up the alignment, this breaks
             batch = self.test_dataset[start_idx:start_idx+100] # no failsafes, the lenght of the training dataset has to be a multiple of 100
-            query = self.get_text(batch[0][0])
+            query = self.get_text(batch[0][0]) # can get query from the first.
             documents = self.get_text(batch[:][1])
             relevancies = batch[:][2]
+            ndcg = 
+
+
