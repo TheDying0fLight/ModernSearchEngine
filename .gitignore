@@ -174,3 +174,4 @@ cython_debug/
 .pypirc
 /project/retriever/models
 /project/retriever/wandb
+/data
