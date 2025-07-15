@@ -1,19 +1,16 @@
 import flet as ft
 import time
-import logging
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
 from .tab_search import SearchTab
 from .tab_favorites import FavoritesTab
-from .results_view import Result
 
 class SearchEnginePage:
     """Main page of the search engine with component-based architecture"""
 
     def __init__(self, page: ft.Page):
         self.page = page
-        self.page.on_route_change = self.route_change
         self.is_searching = False
         self.current_results = []
 
@@ -27,9 +24,9 @@ class SearchEnginePage:
 
         # Initialize tab components
         self.help_tab = HelpTab()
-        self.favorites_tab = FavoritesTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
-        self.search_tab = SearchTab(page=self.page, on_favorite_toggle=self.handle_favorite_toggle)
-        self.history_tab = HistoryTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
+        self.favorites_tab = FavoritesTab(on_navigate_to_search=self.navigate_to_search_tab)
+        self.search_tab = SearchTab(search_func=self.search, on_favorite_toggle=self.handle_favorite_toggle)
+        self.history_tab = HistoryTab(on_search=self.search_from_history, on_navigate_to_search=self.navigate_to_search_tab)
 
         # Build the layout
         self.build_layout()
@@ -64,7 +61,7 @@ class SearchEnginePage:
             self.search(query)
         else:
             self.page.go('/')
-
+ 
     def navigate_to_search_tab(self):
         """Navigate to the search tab"""
         self.tabs.selected_index = 0
@@ -72,6 +69,8 @@ class SearchEnginePage:
 
     def search(self, query: str):
         """Enhanced search function with loading state"""
+        if not query.strip():
+            return
         mock_results = self.generate_mock_results(query)
         self.search_tab.display_results(query, mock_results)
         self.history_tab.add_to_history(query, len(mock_results))
@@ -83,7 +82,7 @@ class SearchEnginePage:
         self.tabs.update()
         self.search(query)
 
-    def handle_favorite_toggle(self, result_data: Result, is_favorited):
+    def handle_favorite_toggle(self, result_data, is_favorited):
         """Handle favorite toggle from search results"""
         if is_favorited:
             return self.favorites_tab.add_favorite(result_data)
@@ -91,7 +90,7 @@ class SearchEnginePage:
             self.favorites_tab.remove_favorite(result_data)
             return True
 
-    def generate_mock_results(self, query: str):
+    def generate_mock_results(self, query):
         """Generate mock search results based on query"""
         # Enhanced mock results with more variety
         all_results = MOCK_RESULTS
@@ -102,8 +101,8 @@ class SearchEnginePage:
         relevant_results = []
 
         for result in all_results:
-            title_lower = result.title.lower()
-            snippet_lower = result.snippet.lower()
+            title_lower = result["title"].lower()
+            snippet_lower = result["snippet"].lower()
 
             # Simple relevance scoring
             if any(word in title_lower or word in snippet_lower for word in query_lower.split()):
@@ -117,7 +116,6 @@ class SearchEnginePage:
 class PageFactory:
     """Creates new pages of type `SearchEnginePage`"""
     def __init__(self):
-        logging.disable()
         pass
 
     def create_page(self, page: ft.Page):
@@ -133,52 +131,52 @@ class PageFactory:
 
 
 MOCK_RESULTS =  [
-    Result(
-        title = "Historical Overview of Tübingen's Old Town",
-        snippet = "Comprehensive guide to Tübingen's medieval architecture, historic buildings, and cultural landmarks in the old town area.",
-        source = "Tourism Board Archives",
-        date = "15.11.2024",
-        pages = "24",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Tübingen University: A 500-Year Legacy",
-        snippet = "The story of one of Germany's oldest universities, its famous alumni, and its impact on the city's development.",
-        source = "University Archives",
-        date = "03.09.2024",
-        pages = "45",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Traditional Swabian Cuisine and Local Beverages",
-        snippet = "A culinary journey through Tübingen's traditional food scene, featuring local specialties, historic restaurants, and brewing traditions.",
-        source = "Regional Food Heritage Archive",
-        date = "22.08.2024",
-        pages = "18",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Hohentübingen Castle: Fortress to Museum",
-        snippet = "The transformation of Tübingen's castle from medieval fortress to modern museum, including archaeological discoveries.",
-        source = "Museum Documentation",
-        date = "07.10.2024",
-        pages = "31",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "The Neckar River and Tübingen's Waterfront",
-        snippet = "How the Neckar River shaped Tübingen's history, from trade routes to modern recreational activities.",
-        source = "Environmental History Society",
-        date = "12.07.2024",
-        pages = "16",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Festival Culture in Tübingen",
-        snippet = "Annual festivals, cultural events, and celebrations that define Tübingen's vibrant community life.",
-        source = "Cultural Events Archive",
-        date = "28.06.2024",
-        pages = "22",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
+    {
+        "id": "doc_001",
+        "title": "Historical Overview of Tübingen's Old Town",
+        "snippet": "Comprehensive guide to Tübingen's medieval architecture, historic buildings, and cultural landmarks in the old town area.",
+        "source": "Tourism Board Archives",
+        "date": "15.11.2024",
+        "pages": 24
+    },
+    {
+        "id": "doc_002",
+        "title": "Tübingen University: A 500-Year Legacy",
+        "snippet": "The story of one of Germany's oldest universities, its famous alumni, and its impact on the city's development.",
+        "source": "University Archives",
+        "date": "03.09.2024",
+        "pages": 45
+    },
+    {
+        "id": "doc_003",
+        "title": "Traditional Swabian Cuisine and Local Beverages",
+        "snippet": "A culinary journey through Tübingen's traditional food scene, featuring local specialties, historic restaurants, and brewing traditions.",
+        "source": "Regional Food Heritage Archive",
+        "date": "22.08.2024",
+        "pages": 18
+    },
+    {
+        "id": "doc_004",
+        "title": "Hohentübingen Castle: Fortress to Museum",
+        "snippet": "The transformation of Tübingen's castle from medieval fortress to modern museum, including archaeological discoveries.",
+        "source": "Museum Documentation",
+        "date": "07.10.2024",
+        "pages": 31
+    },
+    {
+        "id": "doc_005",
+        "title": "The Neckar River and Tübingen's Waterfront",
+        "snippet": "How the Neckar River shaped Tübingen's history, from trade routes to modern recreational activities.",
+        "source": "Environmental History Society",
+        "date": "12.07.2024",
+        "pages": 16
+    },
+    {
+        "id": "doc_006",
+        "title": "Festival Culture in Tübingen",
+        "snippet": "Annual festivals, cultural events, and celebrations that define Tübingen's vibrant community life.",
+        "source": "Cultural Events Archive",
+        "date": "28.06.2024",
+        "pages": 22
+    }
 ]

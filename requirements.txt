@@ -2,4 +2,3 @@ numpy
 regex
 flet
 langdetect
-bs4

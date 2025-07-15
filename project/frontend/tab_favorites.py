@@ -1,25 +1,14 @@
-from dataclasses import dataclass, asdict
 import flet as ft
 from datetime import datetime
 
 from .tab import Tab, TabTitle
 from .components import EmptyState, ResultContainer
-from .results_view import Result
-
-class Favorite(Result):
-    added_date: str
-
-    def __init__(self, res, added_date):
-        super().__init__(**asdict(res))
-        self.added_date = added_date
-
 
 class FavoritesTab(Tab):
     """Favorites tab component for managing bookmarked documents"""
 
-    def __init__(self, page: ft.Page, on_navigate_to_search):
-        self.page = page
-        self.favorites: list[Favorite] = []
+    def __init__(self, on_navigate_to_search):
+        self.favorites = []
         self.empty_state = EmptyState(
             icon=ft.Icons.BOOKMARK_BORDER,
             title="No favorites yet",
@@ -48,33 +37,32 @@ class FavoritesTab(Tab):
             ], expand=True)
         self.favorites_list.update()
 
-    def add_favorite(self, result: ResultContainer):
+    def add_favorite(self, document):
         """Add a document to favorites"""
         # Check if already in favorites
-        print("here")
-        if any(fav.url == result.url for fav in self.favorites):
-            "remove"
+        if any(fav.get("id") == document.get("id") for fav in self.favorites):
             return False
 
         # Add timestamp
-        self.favorites.insert(0, Favorite(result, datetime.now().strftime("%m/%d/%Y")))
-        print(self.favorites)
+        document["added_date"] = datetime.now().strftime("%m/%d/%Y")
+        self.favorites.insert(0, document)
         self.update_favorites_list()
         return True
 
-    def remove_favorite(self, favorite: Favorite):
+    def remove_favorite(self, favorite):
         """Remove a document from favorites"""
-        self.favorites = [fav for fav in self.favorites if fav.url != favorite.url]
+        self.favorites = [fav for fav in self.favorites if fav.get("id") != favorite.get("id")]
         self.update_favorites_list()
 
-    def open_favorite(self, favorite: Favorite):
+    def open_favorite(self, favorite):
         """Open a favorite document"""
-        self.page.launch_url(favorite.url)
+        # This would typically navigate to the document or open it
+        print(f"Opening favorite: {favorite.get('title')}")
 
 
 
 class FavoriteCard(ResultContainer):
-    def __init__(self, favorite: Favorite, on_remove_favorite, on_open_favorite):
+    def __init__(self, favorite, on_remove_favorite, on_open_favorite):
         delete_button=ft.IconButton(
             icon=ft.Icons.DELETE_OUTLINE,
             icon_color=ft.Colors.RED_400,
@@ -82,9 +70,9 @@ class FavoriteCard(ResultContainer):
             on_click=lambda e, fav=favorite: on_remove_favorite(fav)
         )
         super().__init__(
-            title=favorite.title,
-            text=favorite.snippet,
-            source=favorite.source,
-            metadata=[f"Added: {favorite.added_date}"],
+            title=favorite.get("title", "Untitled"),
+            text=favorite.get("snippet", "No description available."),
+            source=favorite.get("source", "Unknown"),
+            metadata=[f"Added: {favorite.get('added_date', 'Unknown')}"],
             button=delete_button,
             on_click=lambda e, fav=favorite: on_open_favorite(fav))
