@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 import logging
 import json
 from bs4 import BeautifulSoup
+import numpy as np
+import math
 
 
 @dataclass
@@ -15,7 +17,6 @@ class Document:
     content_hash: str = field(default="", init=False)
 
     html: str = ""
-    content: str = ""
     meta_description: str = ""
 
     crawl_timestamp: float = field(default_factory=time.time)
@@ -30,6 +31,7 @@ class Document:
     domain: str = field(default="", init=False)
     subdomain: str = field(default="", init=False)
     path_depth: int = field(default=0, init=False)
+    has_ssl: bool = field(default=False, init=False)
 
     language: str = ""
     country_code: str = ""
@@ -38,7 +40,9 @@ class Document:
     embedding = None  # Placeholder for embedding, can be set later
 
     relevant_keywords: list = [r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen']
-    relevance_score: float = 0.0
+    relevance_score: int = 0
+
+    last_crawl_timestamp: float = field(default_factory=time.time)
 
 
 
@@ -57,14 +61,41 @@ class Document:
             self.content_hash = hashlib.md5(self.content.encode()).hexdigest()
 
 
+    def get_content(self) -> str:
+        """ Returns the content of the document, extracting text from HTML."""
+        if not self.html:
+            return ""
+        soup = BeautifulSoup(self.html, 'html.parser')
+        return soup.get_text(separator=' ', strip=True)
+
+
+    def set_html(self, html: str):
+        """ Set new HTML content and update metrics."""
+        self.html = html
+        if html:
+            self.update_metrics()
+            self.content = self.get_content()
+            self.content_hash = hashlib.md5(self.content.encode()).hexdigest()
+
+
     def update_metrics(self):
         soup = BeautifulSoup(self.html, 'html.parser')
         text = soup.get_text(separator=' ', strip=True)
-        self.content = text
         self.title = soup.title.string if soup.title and soup.title.string else ""
-        self.word_count = len(self.content.split())
+        self.word_count = len(text.split())
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
         self.paragraph_count = self.html.count('<p>')
+        self.last_crawl_timestamp = time.time()
+
+        keyword_count = 0
+        for keyword in self.relevant_keywords:
+            if keyword.lower() in self.content.lower():
+                keyword_count += self.content.lower().count(keyword.lower())
+
+        if keyword_count == 0:
+            self.relevance_score -= 10 # reduce score if no keywords found
+        else:
+            self.relevance_score += math.ceil(np.log(keyword_count))
 
 
     def is_duplicate(self, other: 'Document') -> bool:
@@ -116,7 +147,11 @@ class Document:
             "path_depth": self.path_depth,
             "language": self.language,
             "country_code": self.country_code,
-            "crawl_frequency": self.crawl_frequency
+            "crawl_frequency": self.crawl_frequency,
+            "parent_url": self.parent_url,
+            "relevance_score": self.relevance_score,
+            "last_crawl_timestamp": self.last_crawl_timestamp,
+            "embedding": self.embedding.tolist() if self.embedding is not None else None,
         }
 
 
@@ -157,7 +192,7 @@ class DocumentCollection:
         return False
 
 
-    def write_collection_to_file(self, file_path: str):
+    def write_collection_to_file(self, file_path: str = "indexed_docs.jsonl"):
         """ Save the document collection to a file in JSONL format, one document per line."""
         with open(file_path, 'w', encoding='utf-8') as f:
             for url, doc in self.documents.items():
@@ -173,7 +208,8 @@ class DocumentCollection:
                     line = line.strip()
                     if line:  # Skip empty lines
                         doc_data = json.loads(line)
-                        doc = Document(**doc_data)
+                        doc = Document(url="")
+                        doc.load_from_dict(doc_data)
                         self.add_document(doc)
             logging.info(f"Loaded {len(self.documents)} documents from {file_path}")
         except Exception as e:
