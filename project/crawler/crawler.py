@@ -34,6 +34,8 @@ default_user_agents = [
     "(KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
 ]
 
+PARSER = "lxml"
+
 
 class Crawler:
     def __init__(self,
@@ -70,7 +72,7 @@ class Crawler:
 
     def is_captcha_page(self, html):
         markers = ['captcha', 'g-recaptcha', 'hcaptcha', 'confirm this search was made by a human']
-        text = BeautifulSoup(html, 'lxml').get_text(separator=' ').lower()
+        text = BeautifulSoup(html, PARSER).get_text(separator=' ').lower()
         return any(m in text for m in markers)
 
     def download_url(self, url, headers_only=False):
@@ -125,8 +127,7 @@ class Crawler:
         logging.error(f"All attempts failed for {url}")
         raise last_exc
 
-    def get_linked_urls(self, url: str, html: str):
-        soup = BeautifulSoup(html, 'html.parser')
+    def get_linked_urls(self, url: str, soup: BeautifulSoup):
         for link in soup.find_all('a', href=True):
             href = link['href']
             if href.startswith('/'): href = yield urljoin(url, href)
@@ -171,8 +172,8 @@ class Crawler:
         if language_denied: logging.info(f"Assumed non english: {language_denied}")
         return added
 
-    def is_english(self, html):
-        text = BeautifulSoup(html, 'html.parser').get_text(separator=' ')
+    def is_english(self, soup: BeautifulSoup):
+        text = soup.get_text(separator=' ')
         try:
             lang = detect(text)
             return lang == 'en'
@@ -189,11 +190,13 @@ class Crawler:
             try: english = Language.get(headers['content-language']).language == 'en'
             except: pass
             html = self.download_url(url).text
-            english |= self.is_english(html)
+            if len(html.encode()) > 1e7: raise Exception(f"Page to big, Bytes: {len(html.encode())}")
+            soup = BeautifulSoup(html, PARSER)
+            english |= self.is_english(soup)
             if not english: raise BaseException
             keywords_found = any(regex.search(html.lower()) for regex in self.keywords)
-            if keywords_found and len(html.encode()) < 1e7:
-                to_add = set(self.get_linked_urls(url, html))
+            if keywords_found:
+                to_add = set(self.get_linked_urls(url, soup))
                 added = self.add_urls_to_visit(to_add)
                 with self.visit_lock:
                     logging.info(f"Frontier size: {len(self.urls_to_visit)}, "
@@ -230,9 +233,10 @@ class Crawler:
                 post_time = time.time()
                 diff = post_time - prior_time
                 if diff < 2: time.sleep(2 - diff)
-                futures.difference_update(set(filter(lambda f: f[0].done() or post_time - f[1] > 60, futures)))
+                futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
+                visiting = list(map(lambda x: x[2], futures))
                 with self.visit_lock:
-                    logging.info(f"Active threads: {executor.active_count}, Visited: {len(self.visited_pages)}")
+                    logging.info(f"Active threads: {executor.active_count}, Visited: {len(self.visited_pages)}, Sites: {visiting}")
         logging.info("Crawling complete.")
 
     def schedule_urls(self, urls, executor):
@@ -244,5 +248,5 @@ class Crawler:
                 if self.domain_dict[domain].get('in_use'): continue
                 self.domain_dict[domain]['in_use'] = True
             with self.visit_lock: self.urls_to_visit.remove(next_url)
-            futures.add((executor.submit(self.crawl, next_url), time.time()))
+            futures.add((executor.submit(self.crawl, next_url), time.time(), next_url))
         return futures
