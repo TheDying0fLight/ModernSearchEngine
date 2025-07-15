@@ -1,11 +1,15 @@
 import re
-from urllib.parse import urlparse
 import tldextract
 from langcodes import Language
 import os
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Callable, Any
 import threading
+import socket
+from urllib.parse import urlparse
+from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.robotparser import RobotFileParser
 
 _LANG_REG = re.compile(r'^[a-z]{2,3}$', re.IGNORECASE)
 _LANG_REG_SHORT = re.compile(r'^[a-z]{2}$', re.IGNORECASE)
@@ -80,3 +84,18 @@ class TrackingThreadPoolExecutor(ThreadPoolExecutor):
     @property
     def active_count(self) -> int:
         with self._lock: return self._active
+
+class TimeoutRobotFileParser(RobotFileParser):
+    def read(self, timeout: float = 5.0):
+        try:
+            f = urlopen(self.url, timeout=timeout)
+        except HTTPError as err:
+            if err.code in (401, 403):
+                self.disallow_all = True
+            # elif err.code >= 400 and err.code < 500:
+            else:
+                self.allow_all = True
+        except (socket.timeout, URLError, Exception): self.allow_all = True
+        else:
+            raw = f.read()
+            self.parse(raw.decode("utf-8").splitlines())

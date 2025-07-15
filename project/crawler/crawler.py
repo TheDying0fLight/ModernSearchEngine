@@ -11,21 +11,19 @@ import multiprocessing
 from langdetect import detect, LangDetectException
 from .proxy_manager import ProxyManager
 from langcodes import Language
-import urllib.robotparser as urobot
 import validators
 import re
 import json
 import os
-import socket
 
-from .utils import predict_language_from_url, uniquify, TrackingThreadPoolExecutor
+from .utils import predict_language_from_url, uniquify
+from .utils import TrackingThreadPoolExecutor, TimeoutRobotFileParser
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
     level=logging.INFO
 )
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
-socket.setdefaulttimeout(2)
 
 default_user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -41,14 +39,14 @@ class Crawler:
     def __init__(self,
                  urls: list,
                  max_workers: int = multiprocessing.cpu_count() // 2,
-                 keywords: list = [r't\S+bingen'],
+                 keywords: list = [r't\S{1,4}bingen'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = True,
                  verbose: bool = False,
                  out_path: str = "data/crawled.jsonl"):
         self.verbose = verbose
         self.use_proxies = use_proxies
-        self.keywords = keywords
+        self.keywords = [re.compile(kw) for kw in keywords]
         self.user_agents = user_agents
         self.max_workers = max_workers
         self.out_path = uniquify(out_path)
@@ -72,7 +70,7 @@ class Crawler:
 
     def is_captcha_page(self, html):
         markers = ['captcha', 'g-recaptcha', 'hcaptcha', 'confirm this search was made by a human']
-        text = BeautifulSoup(html, 'html.parser').get_text(separator=' ').lower()
+        text = BeautifulSoup(html, 'lxml').get_text(separator=' ').lower()
         return any(m in text for m in markers)
 
     def download_url(self, url, headers_only=False):
@@ -109,13 +107,14 @@ class Crawler:
             start = time.time()
             try:
                 resp = request_fn(url, proxies=proxies, headers=headers_only, timeout=3)
+                text = resp.text
                 elapsed = time.time() - start
                 if 400 <= resp.status_code < 600:
                     logging.info(f"Received {resp.status_code} for {url} via {proxy_url}, stopping retries.")
-                    return resp.text
-                if self.is_captcha_page(resp.text):
+                    return text
+                if self.is_captcha_page(text):
                     logging.warning(f"Captcha detected for {url}, stopping retries.")
-                    return resp.text
+                    return text
                 resp.raise_for_status()
                 self.proxy_manager.update_proxy_quality(proxy_url, success=True, elapsed=elapsed)
                 return resp
@@ -143,12 +142,11 @@ class Crawler:
             entry = self.domain_dict[domain]
             if 'robot' in entry: return entry['robot']('*', path)
 
-        robot = urobot.RobotFileParser()
+        robot = TimeoutRobotFileParser()
         robot.set_url(base_url + "/robots.txt")
-        robot.read()
+        robot.read(3)
 
         with self.domain_lock:
-            # entry['robot'] = lambda *args, **kwargs: True
             self.domain_dict[domain]['robot'] = robot.can_fetch
             return self.domain_dict[domain]['robot']('*', path)
 
@@ -156,9 +154,13 @@ class Crawler:
         added = 0
         language_denied = []
         for url in set(urls):
+            # may remove interesting queries
+            parse = urlparse(url)
+            url = urljoin(url, parse.path)
+
             with self.visit_lock:
-                if url in self.visited_pages: continue
                 if url in self.urls_to_visit: continue
+                if url in self.visited_pages: continue
             if not validators.url(url): continue
             if predict_language_from_url(url) not in ["und", "en"]:
                 language_denied.append(url)
@@ -179,18 +181,18 @@ class Crawler:
             return True
 
     def crawl(self, url):
-        keywords_found = False
-        english = False
-        if self.verbose: logging.info(f"Crawling {url}")
         try:
+            keywords_found = False
+            english = False
+            if self.verbose: logging.info(f"Crawling {url}")
             headers = self.download_url(url, headers_only=True).headers
             try: english = Language.get(headers['content-language']).language == 'en'
             except: pass
             html = self.download_url(url).text
             english |= self.is_english(html)
             if not english: raise BaseException
-            keywords_found = any(re.search(regex, html.lower()) for regex in self.keywords)
-            if keywords_found:
+            keywords_found = any(regex.search(html.lower()) for regex in self.keywords)
+            if keywords_found and len(html.encode()) < 1e7:
                 to_add = set(self.get_linked_urls(url, html))
                 added = self.add_urls_to_visit(to_add)
                 with self.visit_lock:
@@ -201,13 +203,14 @@ class Crawler:
                         f.write(json.dumps({"url": url, "html": html}))
         except Exception as e:
             logging.warning(f"Crawler error: {e}")
-        with self.visit_lock:
-            self.visited_pages[url] = {
-                'keywords_found': keywords_found,
-                'is_english': english,
-            }
-            logging.debug(
-                f"Visited {len(self.visited_pages)} pages (english={english}, kws_found={keywords_found}, URL: {url})")
+        finally:
+            with self.visit_lock:
+                self.visited_pages[url] = {
+                    'keywords_found': keywords_found,
+                    'is_english': english,
+                }
+                logging.debug(
+                    f"Visited {len(self.visited_pages)} pages (english={english}, kws_found={keywords_found}, URL: {url})")
 
         with self.domain_lock:
             self.domain_dict[urlparse(url).hostname]['in_use'] = False
@@ -217,26 +220,29 @@ class Crawler:
         with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
             while True:
-                with self.visit_lock:
-                    if amount is not None and len(self.visited_pages) - start_url_amt >= amount: break
-                    urls = list(self.urls_to_visit.copy())
-                random.shuffle(urls)
-                for next_url in urls:
+                prior_time = time.time()
+                if not amount or len(self.visited_pages) - start_url_amt <= amount:
                     with self.visit_lock:
-                        if next_url in self.visited_pages:
-                            self.urls_to_visit.remove(next_url)
-                            continue
-                    domain = urlparse(next_url).hostname
-                    with self.domain_lock:
-                        if self.domain_dict[domain].get('in_use'): continue
-                        self.domain_dict[domain]['in_use'] = True
-                    with self.visit_lock: self.urls_to_visit.remove(next_url)
-                    futures.add((executor.submit(self.crawl, next_url), time.time()))
+                        urls = list(self.urls_to_visit.copy())
+                    futures.update(self.schedule_urls(urls, executor))
                 if not futures: break
                 # wait x seconds to start more workers
-                time.sleep(2)
-                now = time.time()
-                futures.difference_update(set(filter(lambda f: f[0].done() or now - f[1] > 60, futures)))
+                post_time = time.time()
+                diff = post_time - prior_time
+                if diff < 2: time.sleep(2 - diff)
+                futures.difference_update(set(filter(lambda f: f[0].done() or post_time - f[1] > 60, futures)))
                 with self.visit_lock:
                     logging.info(f"Active threads: {executor.active_count}, Visited: {len(self.visited_pages)}")
         logging.info("Crawling complete.")
+
+    def schedule_urls(self, urls, executor):
+        futures = set()
+        random.shuffle(urls)
+        for next_url in urls:
+            domain = urlparse(next_url).hostname
+            with self.domain_lock:
+                if self.domain_dict[domain].get('in_use'): continue
+                self.domain_dict[domain]['in_use'] = True
+            with self.visit_lock: self.urls_to_visit.remove(next_url)
+            futures.add((executor.submit(self.crawl, next_url), time.time()))
+        return futures
