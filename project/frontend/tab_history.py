@@ -7,10 +7,10 @@ from .components import EmptyState
 class HistoryTab(Tab):
     """History tab component for managing search history"""
 
-    def __init__(self, on_search, on_navigate_to_search):
+    def __init__(self, page: ft.Page, on_navigate_to_search):
+        self.page = page
         self.history_items = []
         self.max_items = 50
-        self.on_search = on_search
         self.empty_state = EmptyState(
             icon=ft.Icons.HISTORY,
             title="No search history yet",
@@ -174,8 +174,7 @@ class HistoryTab(Tab):
 
     def search_again(self, query):
         """Search again with the same query"""
-        if self.on_search:
-            self.on_search(query)
+        self.page.go(f'/search?q={query}')
 
     def clear_all_history(self, e):
         """Clear all search history"""

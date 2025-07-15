@@ -1,17 +1,17 @@
 import flet as ft
 from .components import LoadingIndicator, EmptyState, SearchBar
-from .results_view import ResultsView
+from .results_view import ResultsView, Result
 from.tab import Tab
 
 class SearchTab(Tab):
     """Main search tab component containing search interface and results"""
 
-    def __init__(self, search_func, on_favorite_toggle=None):
-        self.search_func = search_func
+    def __init__(self, page: ft.Page, on_favorite_toggle=None):
+        self.page = page
         self.on_favorite_toggle = on_favorite_toggle
 
         # Initialize components
-        self.search_bar = SearchBar(search_func=self.start_search)
+        self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}'))
         self.loading_indicator = LoadingIndicator("Searching documents...")
         self.results_view = ResultsView(self.handle_favorite_toggle, self.handle_result_click)
         self.header = ft.Column([
@@ -45,24 +45,22 @@ class SearchTab(Tab):
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
-    def handle_result_click(self, result_data):
+    def handle_result_click(self, result_data: Result):
         """Handle result click"""
-        print(f"Opening result: {result_data.get('title')}")
-        # This would typically open the document or navigate to detail view
+        self.page.launch_url(result_data.url)
 
-    def handle_favorite_toggle(self, result_data, is_favorited):
+    def handle_favorite_toggle(self, result_data: Result, is_favorited):
         """Handle favorite toggle"""
         if self.on_favorite_toggle:
             success = self.on_favorite_toggle(result_data, is_favorited)
             if success:
                 action = "Added to" if is_favorited else "Removed from"
-                print(f"{action} favorites: {result_data.get('title')}")
+                print(f"{action} favorites: {result_data.title}")
         else:
-            print(f"Favorite toggle for: {result_data.get('title')}")
+            print(f"Favorite toggle for: {result_data.title}")
 
-    def start_search(self, query):
+    def start_loading(self, query):
         self.loading_indicator.show(f"Searching for '{query}'...")
-        self.search_func(query)
 
     def display_results(self, query, results):
         """Display search results"""
