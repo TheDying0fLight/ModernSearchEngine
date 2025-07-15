@@ -3,7 +3,6 @@ import random
 import requests
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
-# from collections import deque
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -18,6 +17,8 @@ import re
 import urllib.robotparser as urobot
 import json
 import os
+import traceback
+import sys
 
 
 logging.basicConfig(
@@ -37,7 +38,7 @@ default_user_agents = [
 class Crawler:
     def __init__(self,
                  seed: list,
-                 max_workers=multiprocessing.cpu_count()//2,
+                 max_workers= 1,  #multiprocessing.cpu_count()//2,
                  keywords: list = [r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen'],
                  user_agents:list=default_user_agents,
                  use_proxies: bool = False,
@@ -56,8 +57,8 @@ class Crawler:
 
         self.seed = seed if isinstance(seed, list) else [seed]
         self.visited_pages = {}
-        # Initialize as (priority, url, parent_url) tuples - parent_url is None for seed URLs
-        initial_urls = [(0, url, None) for url in (seed or [])]  # same start priority for all seed URLs
+        # Initialize as (priority, url, parent_url, recrawl) tuples - parent_url is None for seed URLs
+        initial_urls = [(0.0, url, None, False) for url in (seed or [])]  # same start priority for all seed URLs
         self.frontier = initial_urls
         heapq.heapify(self.frontier)
         self.proxy_manager = ProxyManager(max_workers=max_workers, verbose=self.verbose) if use_proxies else None
@@ -91,8 +92,9 @@ class Crawler:
             # try to add to collection
             if self.doc_collection.add_document(doc):
                 self.pending_docs.append(doc)
-                logging.info(f"Added document {doc.url} to cache. Cache size: {len(self.pending_docs)}")
-                
+                thread_id = threading.current_thread().ident
+                logging.info(f"[Thread {thread_id}]: Added new document {doc.url} to cache. Cache size: {len(self.pending_docs)}")
+
                 # if write frequency reached, write to file
                 if len(self.pending_docs) >= self.write_frequency:
                     self._write_pending_docs()
@@ -157,7 +159,7 @@ class Crawler:
         request_fn = requests.get
 
         with self.domain_lock:
-            last_time = self.domain_dict[domain]['last_access']
+            last_time = self.domain_dict[domain].get('last_access', None)
             if last_time:
                 now = time.time()
                 delay = random.uniform(1, 3)
@@ -165,7 +167,7 @@ class Crawler:
                 if wait_time > 0: time.sleep(wait_time)
         
         with self.domain_lock:
-            self.domain_last_access[domain] = time.time()
+            self.domain_dict[domain]['last_access'] = time.time()
 
         # use proxies if configured
         if self.proxy_manager and self.use_proxies:
@@ -227,7 +229,7 @@ class Crawler:
             return 0
         
         # scoring based on keyword presence in URL
-        score = sum(1 for kw in self.keywords if re.search(kw, url, re.IGNORECASE))
+        score = sum(10 for kw in self.keywords if re.search(kw, url, re.IGNORECASE))
         
         # additional scoring based on URL structure
         parsed = urlparse(url)
@@ -256,12 +258,15 @@ class Crawler:
         # bump if URL is https
         if parsed.scheme == 'https':
             score += 1
+        
+        thread_id = threading.current_thread().ident
+        logging.debug(f"[Thread {thread_id}]: Relevance score for {url}: {score}")
 
-        return math.ceil(score)
+        return score
 
 
 
-    def add_url_to_frontier(self, url, priority=1, parent_url=None):
+    def add_url_to_frontier(self, url, priority=1, parent_url=None, recrawl=False):
         """Add URL to visit with given priority and parent URL. Lower values = higher priority."""
         with self.lock:
             # check if URL is already visited
@@ -271,7 +276,7 @@ class Crawler:
                 if url not in existing_urls:
                     # priority is negative of relevance score
                     priority = -self.relevance_score(url, parent_url)
-                    heapq.heappush(self.frontier, (priority, url, parent_url))
+                    heapq.heappush(self.frontier, (priority, url, parent_url, recrawl))
 
 
 
@@ -314,10 +319,10 @@ class Crawler:
         Returns True if can resume, False otherwise.
         """
         if not os.path.exists(self.state_file):
-            logging.warning(f"State file {self.state_file} not found. Cannot resume.")
+            logging.info(f"State file {self.state_file} not found. Cannot resume.")
             return False
         if not os.path.exists(self.doc_collection_file):
-            logging.warning(f"Document collection file {self.doc_collection_file} not found. Cannot resume.")
+            logging.info(f"Document collection file {self.doc_collection_file} not found. Cannot resume.")
             return False
 
         # check if state file is recent (e.g., less than 30 days old)
@@ -369,7 +374,10 @@ class Crawler:
 
 
     def add_stale_docs_to_frontier(self):
-        """Add stale documents to the frontier for recrawling."""
+        """
+        Add stale documents to the frontier for recrawling
+        and remove from visited pages.
+        """
         recrawl_interval = self.recrawl_interval
         with self.lock:
             now = time.time()
@@ -379,14 +387,18 @@ class Crawler:
                     stale_docs.append((doc.relevance_score, url, doc.parent_url))
             
             # add stale documents to the frontier with their relevance score as priority
+            # remove url from visited pages
             for score, url, parent_url in stale_docs:
-                self.add_url_to_frontier(url, priority=-score, parent_url=parent_url)
+                self.add_url_to_frontier(url, priority=-score, parent_url=parent_url, recrawl=True)
+                del self.visited_pages[url]
             logging.info(f"Added {len(stale_docs)} stale documents to the frontier for recrawling.")
 
 
 
-    def crawl(self, url, parent_url=None):
+    def crawl(self, url, parent_url=None, recrawl=False):
         """Crawl a single URL, extract links, and add them to the frontier."""
+        thread_id = threading.current_thread().ident
+        logging.info(f"[Thread {thread_id}] >>> ENTERING crawl() for {url}")
         keywords_found = False
         english = False
         # start_time = time.time()
@@ -407,7 +419,16 @@ class Crawler:
             if not parent_url:
                 parent_url = "Seed"
             
-            doc = Document(url=url, html=html, parent_url=parent_url)
+            if not recrawl:
+                doc = Document(url=url, html=html, parent_url=parent_url)
+            else:
+                # if recrawling, load existing document to update metrics
+                doc = self.doc_collection.get_document(url)
+                if not doc:
+                    logging.warning(f"Recrawl requested for {url} but no existing document found.")
+                    return
+                else:
+                    doc._update_html(html)
 
             # update metrics using the stored HTML
             doc.update_metrics()
@@ -427,7 +448,11 @@ class Crawler:
             #     logging.info(f"Page {url} skipped for link extraction: no keywords found.")
                 
         except Exception as e:
+            # logging.error(f"Error crawling {url}: {e}")
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
             logging.error(f"Error crawling {url}: {e}")
+            logging.error(f"Full traceback:\n{''.join(tb_lines)}")
         finally:
             with self.lock:
                 if parent_url:
@@ -435,7 +460,8 @@ class Crawler:
                         "keywords_found": keywords_found,
                         "parent_url": parent_url,
                     }
-                    logging.info(f"Visited {len(self.visited_pages)} pages (Visited {url}, english={english}, keywords_found={keywords_found})")
+                    thread_id = threading.current_thread().ident
+                    logging.info(f"[Thread {thread_id}]: Visited {len(self.visited_pages)} pages (Visited {url}, english={english}, keywords_found={keywords_found})")
 
 
 
@@ -468,9 +494,9 @@ class Crawler:
                 while not self.shutdown_requested:
                     with self.lock:
                         while len(futures) < self.max_workers and self.frontier:
-                            _, next_url, parent_url = heapq.heappop(self.frontier)
+                            _, next_url, parent_url, recrawl = heapq.heappop(self.frontier)
                             if next_url not in self.visited_pages:
-                                futures.add(executor.submit(self.crawl, next_url, parent_url))
+                                futures.add(executor.submit(self.crawl, next_url, parent_url, recrawl))
                     if not futures: break
                     if amount is not None and len(self.visited_pages) >= amount: break
                     done, futures = set(as_completed(futures)), set()
@@ -488,7 +514,10 @@ class Crawler:
                         # logging.error(f"Error in future task: {e}")
                         pass
         except Exception as e:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
             logging.error(f"Error during crawling: {e}")
+            logging.error(f"Full traceback:\n{''.join(tb_lines)}")
             self.shutdown_requested = True
         finally:
             self.cleanup_and_shutdown()

@@ -12,6 +12,8 @@ import math
 
 @dataclass
 class Document:
+    DEFAULT_KEYWORDS = (r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen')
+
     url: str
     title: str = ""
     content_hash: str = field(default="", init=False)
@@ -19,12 +21,9 @@ class Document:
     html: str = ""
     meta_description: str = ""
 
-    crawl_timestamp: float = field(default_factory=time.time)
-
     word_count: int = 0
     sentence_count: int = 0
     paragraph_count: int = 0
-    status_code: int = 200
     canonical_url: str = ""
 
     parent_url: Optional[str] = None
@@ -33,13 +32,11 @@ class Document:
     path_depth: int = field(default=0, init=False)
     has_ssl: bool = field(default=False, init=False)
 
-    language: str = ""
-    country_code: str = ""
     crawl_frequency: int = 0  # number of times crawled
 
     embedding = None  # Placeholder for embedding, can be set later
 
-    relevant_keywords: list = [r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen']
+    relevant_keywords: tuple = field(default=DEFAULT_KEYWORDS)
     relevance_score: int = 0
 
     last_crawl_timestamp: float = field(default_factory=time.time)
@@ -58,7 +55,7 @@ class Document:
 
         if self.html:
             self.update_metrics()
-            self.content_hash = hashlib.md5(self.content.encode()).hexdigest()
+            self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
 
 
     def get_content(self) -> str:
@@ -69,13 +66,12 @@ class Document:
         return soup.get_text(separator=' ', strip=True)
 
 
-    def set_html(self, html: str):
+    def _update_html(self, html: str):
         """ Set new HTML content and update metrics."""
         self.html = html
         if html:
             self.update_metrics()
-            self.content = self.get_content()
-            self.content_hash = hashlib.md5(self.content.encode()).hexdigest()
+            self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
 
 
     def update_metrics(self):
@@ -86,11 +82,18 @@ class Document:
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
         self.paragraph_count = self.html.count('<p>')
         self.last_crawl_timestamp = time.time()
+        self.crawl_frequency += 1
+
+        # metas = soup.find_all("meta")
+        # meta_desc_tags = [meta.get('content', '') for meta in metas 
+        #           if meta.get('name', '').lower() == 'description']
+
+        # self.meta_description = meta_desc_tags[0] if meta_desc_tags else ""
 
         keyword_count = 0
         for keyword in self.relevant_keywords:
-            if keyword.lower() in self.content.lower():
-                keyword_count += self.content.lower().count(keyword.lower())
+            if keyword.lower() in self.get_content().lower():
+                keyword_count += self.get_content().lower().count(keyword.lower())
 
         if keyword_count == 0:
             self.relevance_score -= 10 # reduce score if no keywords found
@@ -133,25 +136,21 @@ class Document:
             "url": self.url,
             "title": self.title,
             "content_hash": self.content_hash,
-            "content": self.content,
             "meta_description": self.meta_description,
-            "crawl_timestamp": self.crawl_timestamp,
             "word_count": self.word_count,
             "sentence_count": self.sentence_count,
             "paragraph_count": self.paragraph_count,
             "has_ssl": self.has_ssl,
-            "status_code": self.status_code,
             "canonical_url": self.canonical_url,
             "domain": self.domain,
             "subdomain": self.subdomain,
             "path_depth": self.path_depth,
-            "language": self.language,
-            "country_code": self.country_code,
             "crawl_frequency": self.crawl_frequency,
             "parent_url": self.parent_url,
             "relevance_score": self.relevance_score,
             "last_crawl_timestamp": self.last_crawl_timestamp,
             "embedding": self.embedding.tolist() if self.embedding is not None else None,
+            "html": self.html
         }
 
 
