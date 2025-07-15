@@ -1,12 +1,22 @@
+from dataclasses import dataclass
 import flet as ft
 from .components import ResultContainer, EmptyState
 from .tab import TabTitle
+
+@dataclass
+class Result:
+    url: str
+    title: str
+    snippet: str
+    source: str
+    date: str
+    pages: str
 
 
 class ResultCard(ResultContainer):
     """Individual result card component"""
 
-    def __init__(self, result_data, on_click_callback=None, on_favorite_callback=None):
+    def __init__(self, result_data: Result, on_click_callback=None, on_favorite_callback=None):
         self.result_data = result_data
         self.on_click_callback = on_click_callback
         self.on_favorite_callback = on_favorite_callback
@@ -18,10 +28,10 @@ class ResultCard(ResultContainer):
             on_click=self.toggle_favorite
         )
         super().__init__(
-            title=self.result_data.get("title", "No Title"),
-            text=self.result_data.get("snippet", "No description available."),
-            source=self.result_data.get("source", "Unknown"),
-            metadata=[self.result_data.get("date", "Unknown"), f"{self.result_data.get('pages', 'N/A')} pages"],
+            title=self.result_data.title,
+            text=self.result_data.snippet,
+            source=self.result_data.source,
+            metadata=[self.result_data.date, f"{self.result_data.pages} pages"],
             button=self.favorite_button,
             on_click=lambda e, result_data=result_data: on_click_callback(result_data)
         )
@@ -51,7 +61,7 @@ class ResultsView(ft.Container):
             visible=False
         )
 
-    def show_results(self, query, results):
+    def show_results(self, query, results: list[Result]):
         if (not results) or len(results) == 0:
             self.content = results_component = EmptyState(
                 icon=ft.Icons.SEARCH_OFF,
