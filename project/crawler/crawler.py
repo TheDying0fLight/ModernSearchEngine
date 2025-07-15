@@ -81,6 +81,8 @@ class Crawler:
         recrawl_interval = 60 * 60 * 24 * 7  # recrawl if site is older than 7 days
         self.recrawl_interval = recrawl_interval  # seconds
 
+        self.shutdown_requested = False  # flag to signal shutdown
+
 
 
     def add_document_to_cache(self, doc: Document):
@@ -305,6 +307,84 @@ class Crawler:
 
 
 
+    def _can_resume(self) -> bool:
+        """
+        Check if previous crawler state and document collection exists and 
+        is recent enough to resume.
+        Returns True if can resume, False otherwise.
+        """
+        if not os.path.exists(self.state_file):
+            logging.warning(f"State file {self.state_file} not found. Cannot resume.")
+            return False
+        if not os.path.exists(self.doc_collection_file):
+            logging.warning(f"Document collection file {self.doc_collection_file} not found. Cannot resume.")
+            return False
+
+        # check if state file is recent (e.g., less than 30 days old)
+        stat = os.stat(self.state_file)
+        age_hours = (time.time() - stat.st_mtime) / 3600
+        if age_hours > 30 * 24:  # state too old, start fresh
+            logging.info(f"Previous state is {age_hours:.1f} hours old, starting fresh crawl")
+            return False
+        
+        logging.info(f"Found recent crawler state ({age_hours:.1f} hours old)")
+        return True
+    
+
+
+    def get_crawling_stats(self):
+        """Get statistics about the crawling session."""
+        with self.write_lock:
+            return {
+                'total_documents': len(self.doc_collection.documents),
+                'visited_pages': len(self.visited_pages),
+                'frontier': len(self.frontier)
+            }
+    
+
+
+    def save_current_state(self, file_path: str = "crawler_state.json"):
+        """Save the current frontier and visited pages to a file."""
+        with self.write_lock:
+            state = {
+                'frontier': list(self.frontier),
+                'visited_pages': self.visited_pages
+            }
+            with open(file_path, 'w') as f:
+                json.dump(state, f)
+            logging.info(f"Saved current state to {file_path}")
+    
+
+
+    def load_state(self, state_file: str):
+        """Load the frontier and visited pages from a file."""
+        with self.write_lock:
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+                self.frontier = state.get('frontier', [])
+                heapq.heapify(self.frontier)
+                self.visited_pages = state.get('visited_pages', {})
+            logging.info(f"Loaded crawler state from {state_file}")
+
+
+
+    def add_stale_docs_to_frontier(self):
+        """Add stale documents to the frontier for recrawling."""
+        recrawl_interval = self.recrawl_interval
+        with self.lock:
+            now = time.time()
+            stale_docs = []
+            for url, doc in self.doc_collection.documents.items():
+                if now - doc.last_crawl_timestamp > recrawl_interval:
+                    stale_docs.append((doc.relevance_score, url, doc.parent_url))
+            
+            # add stale documents to the frontier with their relevance score as priority
+            for score, url, parent_url in stale_docs:
+                self.add_url_to_frontier(url, priority=-score, parent_url=parent_url)
+            logging.info(f"Added {len(stale_docs)} stale documents to the frontier for recrawling.")
+
+
+
     def crawl(self, url, parent_url=None):
         """Crawl a single URL, extract links, and add them to the frontier."""
         keywords_found = False
@@ -385,7 +465,7 @@ class Crawler:
         try:
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = set()
-                while True:
+                while not self.shutdown_requested:
                     with self.lock:
                         while len(futures) < self.max_workers and self.frontier:
                             _, next_url, parent_url = heapq.heappop(self.frontier)
@@ -399,104 +479,37 @@ class Crawler:
                             future.result()
                         except Exception:
                             pass
+            if self.shutdown_requested and futures:
+                logging.info("Shutdown requested, waiting for remaining tasks to complete.")
+                for future in futures:
+                    try:
+                        future.result()
+                    except Exception as e:
+                        # logging.error(f"Error in future task: {e}")
+                        pass
+        except Exception as e:
+            logging.error(f"Error during crawling: {e}")
+            self.shutdown_requested = True
         finally:
-            # finalize the crawl to save any remaining documents in the cache
-            self.finalize_crawl()
-            # save state for potential resumption
-            if self.auto_resume:
-                self.save_current_state(self.state_file)
-            logging.info(self.get_crawling_stats())
+            self.cleanup_and_shutdown()
         logging.info("Crawling complete.")
 
 
 
-    def _can_resume(self) -> bool:
-        """
-        Check if previous crawler state and document collection exists and 
-        is recent enough to resume.
-        Returns True if can resume, False otherwise.
-        """
-        if not os.path.exists(self.state_file):
-            logging.warning(f"State file {self.state_file} not found. Cannot resume.")
-            return False
-        if not os.path.exists(self.doc_collection_file):
-            logging.warning(f"Document collection file {self.doc_collection_file} not found. Cannot resume.")
-            return False
+    def cleanup_and_shutdown(self):
+        """Perform cleanup tasks on shutdown."""
+        logging.info("Crawler is shutting down, performing cleanup...")
+        self.finalize_crawl(backup=True)
+        if self.auto_resume:
+            self.save_current_state(self.state_file)
 
-        # check if state file is recent (e.g., less than 30 days old)
-        stat = os.stat(self.state_file)
-        age_hours = (time.time() - stat.st_mtime) / 3600
-        if age_hours > 30 * 24:  # state too old, start fresh
-            logging.info(f"Previous state is {age_hours:.1f} hours old, starting fresh crawl")
-            return False
-        
-        logging.info(f"Found recent crawler state ({age_hours:.1f} hours old)")
-        return True
-    
-
-
-    def get_crawling_stats(self):
-        """Get statistics about the crawling session."""
-        with self.write_lock:
-            return {
-                'total_documents': len(self.doc_collection.documents),
-                'visited_pages': len(self.visited_pages),
-                'frontier': len(self.frontier)
-            }
-    
-
-
-    def save_current_state(self, file_path: str = "crawler_state.json"):
-        """Save the current frontier and visited pages to a file."""
-        with self.write_lock:
-            state = {
-                'frontier': list(self.frontier),
-                'visited_pages': self.visited_pages
-            }
-            with open(file_path, 'w') as f:
-                json.dump(state, f)
-            logging.info(f"Saved current state to {file_path}")
-    
-
-
-    def load_state(self, state_file: str):
-        """Load the frontier and visited pages from a file."""
-        with self.write_lock:
-            with open(state_file, 'r') as f:
-                state = json.load(f)
-                self.frontier = state.get('frontier', [])
-                heapq.heapify(self.frontier)
-                self.visited_pages = state.get('visited_pages', {})
-            logging.info(f"Loaded crawler state from {state_file}")
+        stats = self.get_crawling_stats()
+        logging.info(f"Final stats: {stats}")
+        logging.info("Cleanup complete. Crawler has shut down gracefully.")
 
 
 
-    def add_stale_docs_to_frontier(self):
-        """Add stale documents to the frontier for recrawling."""
-        recrawl_interval = self.recrawl_interval
-        with self.lock:
-            now = time.time()
-            stale_docs = []
-            for url, doc in self.doc_collection.documents.items():
-                if now - doc.last_crawl_timestamp > recrawl_interval:
-                    stale_docs.append((doc.relevance_score, url, doc.parent_url))
-            
-            # add stale documents to the frontier with their relevance score as priority
-            for score, url, parent_url in stale_docs:
-                self.add_url_to_frontier(url, priority=-score, parent_url=parent_url)
-            logging.info(f"Added {len(stale_docs)} stale documents to the frontier for recrawling.")
-    
-
-
-
-
-def test_url(url):
-    resp = requests.get(url, timeout=10)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, 'html.parser')
-    for link in soup.find_all('a', href=True):
-        href = link['href']
-        if href.startswith('/'):
-            href = urljoin(url, href)
-        print(href)
-    return resp
+    def request_shutdown(self):
+        """Request a graceful shutdown of the crawler."""
+        logging.info("Shutdown requested. Crawler will finish current tasks and exit.")
+        self.shutdown_requested = True
