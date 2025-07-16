@@ -37,6 +37,7 @@ default_user_agents = [
 ]
 
 PARSER = "lxml"
+DEFAULT_DELAY = 1
 
 
 class Crawler:
@@ -61,7 +62,7 @@ class Crawler:
         self.domain_lock = threading.Lock()
         self.visit_lock = threading.Lock()
         self.json_lock = threading.Lock()
-        self.domain_dict = defaultdict(lambda: defaultdict(str))
+        self.domain_dict = defaultdict(lambda: defaultdict(int))
 
         self.visited_pages = {}
         self.urls_to_visit = set(urls)
@@ -85,9 +86,10 @@ class Crawler:
 
         with self.domain_lock:
             last_time = self.domain_dict[domain]['last_access']
+            delay = self.domain_dict[domain]['delay']
         if last_time:
             now = time.time()
-            delay = random.uniform(5, 7)
+            delay += DEFAULT_DELAY + random.uniform(0, 2)
             wait_time = last_time + delay - now
             if wait_time > 0: time.sleep(wait_time)
         with self.domain_lock:
@@ -97,6 +99,12 @@ class Crawler:
             try:
                 resp = request_fn(url, headers=self.get_random_headers(), timeout=3)
                 resp.raise_for_status()
+                if resp.status_code == 429:
+                    with self.domain_lock:
+                        self.domain_dict[domain]["delay"] += 1
+                        delay = self.domain_dict[domain]["delay"]
+                    with self.visit_lock: self.urls_to_visit.add(url)
+                    logging.warning(colored(f"429 Received: Delay increased to {delay}s for: {domain}", "red"))
                 return resp
             except Exception as e:
                 logging.error(f"Direct request failed for {url}: {e}")
@@ -207,7 +215,7 @@ class Crawler:
                                  f"Added {added}/{len(to_add)} URLs from {url}")
                 with self.json_lock:
                     with open(self.out_path, "a") as f:
-                        f.write(json.dumps({"url": url, "headers": headers, "html": html}))
+                        f.write(json.dumps({"url": url, "html": html}))
         except Exception as e:
             logging.warning(f"Crawler error: {e}")
         finally:
