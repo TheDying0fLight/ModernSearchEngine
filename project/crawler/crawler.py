@@ -65,9 +65,10 @@ class Crawler:
         self.domain_dict = defaultdict(lambda: defaultdict(int))
 
         self.visited_pages = {}
-        self.urls_to_visit = set(urls)
+        self.urls_to_visit = defaultdict(set)
+        self.add_urls_to_visit(urls)
 
-    def get_domain(self, parse: ParseResult): return "".join(parse.hostname.split(".")[-2:])
+    def get_domain(self, parse: ParseResult): return ".".join(parse.hostname.split(".")[-2:])
 
     def get_random_headers(self):
         return {
@@ -91,7 +92,7 @@ class Crawler:
             delay = self.domain_dict[domain]['delay']
         if last_time:
             now = time.time()
-            delay += DEFAULT_DELAY + random.uniform(0, 2)
+            delay += DEFAULT_DELAY + random.uniform(0, 1 + (delay / 8))
             wait_time = last_time + delay - now
             if wait_time > 0: time.sleep(wait_time)
         with self.domain_lock:
@@ -176,7 +177,7 @@ class Crawler:
             if str(t).split("/")[0] not in ["None", "text"]: continue
             with self.visit_lock:
                 if url in self.urls_to_visit: continue
-                if url in self.visited_pages: continue
+                if url in self.visited_pages.keys(): continue
             if predict_language_from_url(url) not in ["und", "en"]:
                 language_denied.append(url)
                 continue
@@ -244,14 +245,14 @@ class Crawler:
                         urls = list(self.urls_to_visit.copy())
                     futures.update(self.schedule_urls(urls, executor))
                 if not futures: break
-                # wait x seconds to start more workers
+
                 post_time = time.time()
                 diff = post_time - prior_time
                 if diff < 2: time.sleep(2 - diff)
                 futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
                 visiting = list(map(lambda x: x[2], futures))
                 with self.visit_lock:
-                    logging.info(colored(f'Active threads: {executor.active_count}, '
+                    logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}'
                                          f'Visited: {len(self.visited_pages)}, Sites: {visiting}', 'green'))
         logging.info("Crawling complete.")
 
