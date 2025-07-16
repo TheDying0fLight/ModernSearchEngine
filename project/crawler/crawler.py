@@ -1,21 +1,22 @@
-import logging
-import random
-import requests
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
-import warnings
 from collections import defaultdict
-import time
-import threading
-import multiprocessing
 from langdetect import detect, LangDetectException
 from .proxy_manager import ProxyManager
 from langcodes import Language
+from termcolor import colored
 import validators
 import re
 import json
 import os
+import warnings
 import mimetypes
+import logging
+import random
+import requests
+import time
+import threading
+import multiprocessing
 
 from .utils import predict_language_from_url, uniquify
 from .utils import TrackingThreadPoolExecutor, TimeoutRobotFileParser
@@ -76,7 +77,7 @@ class Crawler:
         text = BeautifulSoup(html, PARSER).get_text(separator=' ').lower()
         return any(m in text for m in markers)
 
-    def download_url(self, url, headers_only=False):
+    def download_url(self, url: str, headers_only: bool = False):
         last_exc = None
         attempt = 0
         domain = urlparse(url).hostname
@@ -157,8 +158,8 @@ class Crawler:
         language_denied = []
         for url in set(urls):
             # may remove interesting queries
-            parse = urlparse(url)
-            url = urljoin(url, parse.path)
+            # parse = urlparse(url)
+            # url = urljoin(url, parse.path)
 
             if not validators.url(url): continue
             t = mimetypes.guess_type(url)[0]
@@ -184,7 +185,7 @@ class Crawler:
             logging.info("Language detection failed, assuming English")
             return True
 
-    def crawl(self, url):
+    def crawl(self, url: str):
         try:
             keywords_found = False
             english = False
@@ -193,7 +194,7 @@ class Crawler:
             try: english = Language.get(headers['content-language']).language == 'en'
             except: pass
             html = self.download_url(url).text
-            if len(html.encode()) > 1e7: raise Exception(f"Page to big, Bytes: {len(html.encode())}, {url}")
+            if len(html.encode()) > 1e8: raise Exception(f"Page to big, Bytes: {len(html.encode())}, {url}")
             soup = BeautifulSoup(html, PARSER)
             english |= self.is_english(soup)
             if not english: raise BaseException
@@ -206,7 +207,7 @@ class Crawler:
                                  f"Added {added}/{len(to_add)} URLs from {url}")
                 with self.json_lock:
                     with open(self.out_path, "a") as f:
-                        f.write(json.dumps({"url": url, "html": html}))
+                        f.write(json.dumps({"url": url, "headers": headers, "html": html}))
         except Exception as e:
             logging.warning(f"Crawler error: {e}")
         finally:
@@ -239,10 +240,11 @@ class Crawler:
                 futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
                 visiting = list(map(lambda x: x[2], futures))
                 with self.visit_lock:
-                    logging.info(f"Active threads: {executor.active_count}, Visited: {len(self.visited_pages)}, Sites: {visiting}")
+                    logging.info(colored(f'Active threads: {executor.active_count},'
+                                         f'Visited: {len(self.visited_pages)}, Sites: {visiting}', 'green'))
         logging.info("Crawling complete.")
 
-    def schedule_urls(self, urls, executor):
+    def schedule_urls(self, urls: list[str], executor: TrackingThreadPoolExecutor):
         futures = set()
         random.shuffle(urls)
         for next_url in urls:
