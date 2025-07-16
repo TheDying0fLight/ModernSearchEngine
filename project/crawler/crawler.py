@@ -1,4 +1,4 @@
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, ParseResult
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from collections import defaultdict
 from langdetect import detect, LangDetectException
@@ -67,6 +67,8 @@ class Crawler:
         self.visited_pages = {}
         self.urls_to_visit = set(urls)
 
+    def get_domain(self, parse: ParseResult): return parse.hostname.split(".")[-2:]
+
     def get_random_headers(self):
         return {
             'User-Agent': random.choice(self.user_agents),
@@ -81,7 +83,7 @@ class Crawler:
     def download_url(self, url: str, headers_only: bool = False):
         last_exc = None
         attempt = 0
-        domain = urlparse(url).hostname
+        domain = self.get_domain(urlparse(url))
         request_fn = requests.head if headers_only else requests.get
 
         with self.domain_lock:
@@ -98,13 +100,13 @@ class Crawler:
         if not self.use_proxies:
             try:
                 resp = request_fn(url, headers=self.get_random_headers(), timeout=3)
-                resp.raise_for_status()
                 if resp.status_code == 429:
                     with self.domain_lock:
                         self.domain_dict[domain]["delay"] += 1
                         delay = self.domain_dict[domain]["delay"]
                     with self.visit_lock: self.urls_to_visit.add(url)
-                    logging.warning(colored(f"429 Received: Delay increased to {delay}s for: {domain}", "red"))
+                    logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
+                resp.raise_for_status()
                 return resp
             except Exception as e:
                 logging.error(f"Direct request failed for {url}: {e}")
@@ -145,7 +147,7 @@ class Crawler:
 
     def is_useragent_allowed(self, url: str):
         parse = urlparse(url)
-        domain = parse.hostname
+        domain = self.get_domain(parse)
         path = parse.path
         base_url = f"{parse.scheme}://{parse.netloc}"
 
@@ -227,8 +229,9 @@ class Crawler:
                 logging.debug(
                     f"Visited {len(self.visited_pages)} pages (english={english}, kws_found={keywords_found}, URL: {url})")
 
+        domain = self.get_domain(urlparse(url))
         with self.domain_lock:
-            self.domain_dict[urlparse(url).hostname]['in_use'] = False
+            self.domain_dict[domain]['in_use'] = False
 
     def run(self, amount: int = None):
         start_url_amt = len(self.visited_pages)
@@ -248,7 +251,7 @@ class Crawler:
                 futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
                 visiting = list(map(lambda x: x[2], futures))
                 with self.visit_lock:
-                    logging.info(colored(f'Active threads: {executor.active_count},'
+                    logging.info(colored(f'Active threads: {executor.active_count}, '
                                          f'Visited: {len(self.visited_pages)}, Sites: {visiting}', 'green'))
         logging.info("Crawling complete.")
 
@@ -256,7 +259,7 @@ class Crawler:
         futures = set()
         random.shuffle(urls)
         for next_url in urls:
-            domain = urlparse(next_url).hostname
+            domain = self.get_domain(urlparse(next_url))
             with self.domain_lock:
                 if self.domain_dict[domain].get('in_use'): continue
                 self.domain_dict[domain]['in_use'] = True
