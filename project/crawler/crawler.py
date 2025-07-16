@@ -67,7 +67,7 @@ class Crawler:
         self.visited_pages = {}
         self.urls_to_visit = set(urls)
 
-    def get_domain(self, parse: ParseResult): return parse.hostname.split(".")[-2:]
+    def get_domain(self, parse: ParseResult): return "".join(parse.hostname.split(".")[-2:])
 
     def get_random_headers(self):
         return {
