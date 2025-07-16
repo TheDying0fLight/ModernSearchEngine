@@ -15,6 +15,7 @@ import validators
 import re
 import json
 import os
+import mimetypes
 
 from .utils import predict_language_from_url, uniquify
 from .utils import TrackingThreadPoolExecutor, TimeoutRobotFileParser
@@ -159,10 +160,12 @@ class Crawler:
             parse = urlparse(url)
             url = urljoin(url, parse.path)
 
+            if not validators.url(url): continue
+            t = mimetypes.guess_type(url)[0]
+            if str(t).split("/")[0] not in ["None", "text"]: continue
             with self.visit_lock:
                 if url in self.urls_to_visit: continue
                 if url in self.visited_pages: continue
-            if not validators.url(url): continue
             if predict_language_from_url(url) not in ["und", "en"]:
                 language_denied.append(url)
                 continue
@@ -190,7 +193,7 @@ class Crawler:
             try: english = Language.get(headers['content-language']).language == 'en'
             except: pass
             html = self.download_url(url).text
-            if len(html.encode()) > 1e7: raise Exception(f"Page to big, Bytes: {len(html.encode())}")
+            if len(html.encode()) > 1e7: raise Exception(f"Page to big, Bytes: {len(html.encode())}, {url}")
             soup = BeautifulSoup(html, PARSER)
             english |= self.is_english(soup)
             if not english: raise BaseException
