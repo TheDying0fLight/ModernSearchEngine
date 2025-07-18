@@ -94,4 +94,7 @@ class TimeoutRobotFileParser(RobotFileParser):
         except (socket.timeout, URLError, Exception): self.allow_all = True
         else:
             raw = f.read()
-            self.parse(raw.decode("utf-8").splitlines())
+            try:
+                self.parse(raw.decode("utf-8").splitlines())
+            except:
+                self.allow_all = True

@@ -5,7 +5,6 @@ from langdetect import detect, LangDetectException
 from langcodes import Language
 from termcolor import colored
 from typing import Optional
-from pathlib import Path
 import validators
 import re
 import json
@@ -19,6 +18,8 @@ import time
 import threading
 import multiprocessing
 import heapq
+import sys
+import traceback
 
 from .utils import predict_language_from_url
 from .utils import TrackingThreadPoolExecutor, TimeoutRobotFileParser
@@ -64,23 +65,25 @@ class Crawler:
         self.state_file = (state_file)
         self.doc_collection_file = (doc_collection_file)
 
-        self.seed = seed if isinstance(seed, list) else [seed]
-        self.visited_pages = {}
-        # initialize as (priority, url, parent_url, recrawl) tuples - parent_url is None for seed URLs
-        initial_urls = [(0.0, url, None, False) for url in (seed or [])]  # same start priority for all seed URLs
-        self.frontier = initial_urls
-        heapq.heapify(self.frontier)
+        self.write_lock = threading.Lock()
+
         self.proxy_manager = ProxyManager(max_workers=max_workers) if use_proxies else None
 
         self.frontier_lock = threading.Lock()
-        self.visited_lock = threading.Lock()
-        self.domain_lock = threading.Lock()
-        self.doc_lock = threading.Lock()
-        self.write_lock = threading.Lock()
+        self.seed = seed if isinstance(seed, list) else [seed]
+        # initialize as (priority, url, parent_url, recrawl) tuples - parent_url is None for seed URLs
+        initial_urls = [(0.0, url, None, False) for url in (seed or [])]
+        self.frontier = initial_urls
+        heapq.heapify(self.frontier)
 
+        self.visited_lock = threading.Lock()
+        self.visited_pages = {}
+
+        self.domain_lock = threading.Lock()
         self.domain_dict = defaultdict(lambda: defaultdict(int))
 
         # initialize document collection
+        self.doc_lock = threading.Lock()
         self.doc_collection = DocumentCollection()
         self.write_frequency = 10  # write to file every 10 documents
         self.pending_docs = []  # cache for documents waiting to be written
@@ -230,10 +233,9 @@ class Crawler:
 
         if any(pattern in url.lower() for pattern in useless): return False
 
-        with self.frontier_lock:
-            existing_urls = {item[1] for item in self.frontier}
-            if url in existing_urls: return False
-        
+        with self.frontier_lock: existing_urls = {item[1] for item in self.frontier}
+        if url in existing_urls: return False
+
         with self.visited_lock:
             if url in self.visited_pages: return False
 
@@ -356,22 +358,20 @@ class Crawler:
             logging.error(f"Error crawling {url}: {e}")
             # exc_type, exc_value, exc_traceback = sys.exc_info()
             # tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
-            # logging.debug(f"Full traceback:\n{''.join(tb_lines)}")
+            # logging.error(f"Full traceback:\n{''.join(tb_lines)}")
         finally:
-            with self.domain_lock:
-                domain = self.get_domain(urlparse(url))
-                self.domain_dict[domain]['in_use'] = False
-
+            doc = self.doc_collection.get_document(url)
+            relevance = doc.relevance_score if doc else "no relevance score"
             with self.visited_lock:
                 self.visited_pages[url] = {
                     "keywords_found": keywords_found,
                     "parent_url": parent_url,
                 }
-            doc = self.doc_collection.get_document(url)
-            relevance = doc.relevance_score if doc else "no relevance score"
-            with self.frontier_lock:
                 logging.debug(
                     f"Visited {len(self.visited_pages)} pages (english={english}, relevance={relevance}, URL: {url})")
+
+            domain = self.get_domain(urlparse(url))
+            with self.domain_lock: self.domain_dict[domain]['in_use'] = False
 
     def run(self, amount: Optional[int] = None):
         if self.auto_resume and self._can_resume():
@@ -392,12 +392,12 @@ class Crawler:
             if isinstance(self.visited_pages, dict) and isinstance(amount, int):
                 amount += len(self.visited_pages)
 
-        start_url_amt = len(self.visited_pages)
         with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
             while True:
                 prior_time = time.time()
-                if not amount or len(self.visited_pages) - start_url_amt <= amount:
+                with self.visited_lock: amt_visited = len(self.visited_pages)
+                if not amount or amt_visited <= amount:
                     futures.update(self.schedule_urls(executor))
                 if not futures: break
 
@@ -405,10 +405,10 @@ class Crawler:
                 diff = post_time - prior_time
                 if diff < 2: time.sleep(2 - diff)
                 visiting = list(map(lambda x: x[2], futures))
-                with self.visited_lock:
-                    logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, '
-                                         f'Visited: {len(self.visited_pages)}, Sites: {visiting[:20]} ...', 'green'))
-                    logging.info(colored(f'Domain dict size: {len(self.domain_dict)}', 'blue'))
+                with self.visited_lock: amt_visited     = len(self.visited_pages)
+                with self.domain_lock:  len_domain_dict = len(self.domain_dict)
+                logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, Domain dict size: {len_domain_dict}, '
+                                     f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
                 futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
         self.cleanup_and_shutdown()
 
@@ -421,11 +421,10 @@ class Crawler:
                 if self.domain_dict[domain].get('in_use'): continue
                 self.domain_dict[domain]['in_use'] = True
 
-            with self.frontier_lock: self.frontier.remove(entry)
-            futures.add((
-                executor.submit(self.crawl, entry),
-                time.time(),
-                entry[1]))
+            with self.frontier_lock:
+                self.frontier.remove(entry)
+                heapq.heapify(self.frontier)
+            futures.add((executor.submit(self.crawl, entry), time.time(), entry[1]))
         return futures
 
     def _can_resume(self) -> bool:
@@ -448,22 +447,17 @@ class Crawler:
 
     def get_crawling_stats(self):
         """Get statistics about the crawling session."""
-        with self.write_lock:
-            return {
-                'total_documents': len(self.doc_collection.documents),
-                'visited_pages': len(self.visited_pages),
-                'frontier': len(self.frontier)
-            }
+        with self.doc_lock:      stats = {'total_documents': len(self.doc_collection.documents)}
+        with self.visited_lock:  stats['visited_pages'] = len(self.visited_pages)
+        with self.frontier_lock: stats['frontier'] = len(self.frontier)
+        return stats
 
     def save_current_state(self, file_path: str = "crawler_state.json"):
         """Save the current frontier and visited pages to a file."""
+        with self.visited_lock:  state = {'visited_pages': self.visited_pages}
+        with self.frontier_lock: state['frontier'] = list(self.frontier)
         with self.write_lock:
-            state = {
-                'frontier': list(self.frontier),
-                'visited_pages': self.visited_pages
-            }
-            with open(file_path, 'w') as f:
-                json.dump(state, f)
+            with open(file_path, 'w') as f: json.dump(state.copy(), f)
             logging.debug(f"Saved current state to {file_path}")
 
     def load_state(self, state_file: str):
@@ -497,7 +491,7 @@ class Crawler:
             # remove url from visited pages
             for score, url, parent_url in stale_docs:
                 self.add_urls_to_frontier(url, priority=-score, parent_url=parent_url, recrawl=True)
-                del self.visited_pages[url]
+                with self.visited_lock: del self.visited_pages[url]
             logging.info(f"Added {len(stale_docs)} stale documents to the frontier for recrawling.")
 
     def cleanup_and_shutdown(self):
