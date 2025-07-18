@@ -7,6 +7,7 @@ from transformers.utils.notebook import NotebookProgressCallback
 from evaluation import compute_metrics
 import numpy as np
 import wandb
+from utils import get_train_and_test_data
 
 # loss = "siglip"
 loss = "clip"
@@ -21,13 +22,20 @@ dataset_name = "microsoft/ms_marco"
 dir_name = "v2.1"
 dataset = load_dataset(dataset_name, dir_name)
 
+data_paths = [
+    ("microsoft/ms_marco", "v1.1"),
+    ("microsoft/ms_marco", "v2.1"),
+]
+train_data, test_data = get_train_and_test_data(data_paths)
+
 lr_n = "" if lr == 1e-7 else f"lr{lr:.0E}_"
 b_n = "" if batch_size == 2 else f"b{batch_size}_"
 
 model_name = model.model_name.split("/")[-1]
 model_path = f"{loss}/{model_name}/{b_n}{lr_n}{dataset_name}{dir_name}"
 print(model_path)
-print(dataset)
+print(train_data)
+print(test_data)
 
 os.environ["WANDB_PROJECT"] = "MSE"
 os.environ["WANDB_LOG_MODEL"] = "false"
@@ -67,8 +75,8 @@ def collate_fn(batch):
 trainer = Trainer(
     model,
     training_args,
-    train_dataset=dataset["train"],
-    eval_dataset=dataset["test"].take(10000),
+    train_dataset=train_data,
+    eval_dataset=test_data,
     data_collator=collate_fn,
     compute_metrics=compute_metrics
 )

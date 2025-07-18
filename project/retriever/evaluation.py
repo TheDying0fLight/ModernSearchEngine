@@ -1,5 +1,4 @@
 import numpy as np
-from sklearn.metrics import confusion_matrix
 import math
 
 def compute_metrics(eval_pred):
@@ -54,8 +53,4 @@ def compute_metrics(eval_pred):
     metrics['best_threshold'] = best_thresh
     metrics['best_score'] = best_score
 
-    # Confusion at best threshold
-    y_pred_best = (y_scores >= best_thresh).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred_best).ravel()
-    metrics.update({'tp': int(tp), 'tn': int(tn), 'fp': int(fp), 'fn': int(fn)})
     return metrics
