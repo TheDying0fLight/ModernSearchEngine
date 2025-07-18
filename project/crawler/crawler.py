@@ -92,26 +92,22 @@ class Crawler:
             delay = self.domain_dict[domain]['delay']
         if last_time:
             now = time.time()
-            delay += DEFAULT_DELAY + random.uniform(0, 1 + (delay / 8))
+            delay += DEFAULT_DELAY + random.uniform(0, (delay / 8))
             wait_time = last_time + delay - now
             if wait_time > 0: time.sleep(wait_time)
         with self.domain_lock:
             self.domain_dict[domain]['last_access'] = time.time()
 
         if not self.use_proxies:
-            try:
-                resp = request_fn(url, headers=self.get_random_headers(), timeout=3)
-                if resp.status_code == 429:
-                    with self.domain_lock:
-                        self.domain_dict[domain]["delay"] += 1
-                        delay = self.domain_dict[domain]["delay"]
-                    with self.visit_lock: self.urls_to_visit.add(url)
-                    logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
-                resp.raise_for_status()
-                return resp
-            except Exception as e:
-                logging.error(f"Direct request failed for {url}: {e}")
-                raise
+            resp = request_fn(url, headers=self.get_random_headers(), timeout=3)
+            if resp.status_code == 429:
+                with self.domain_lock:
+                    self.domain_dict[domain]["delay"] += 1
+                    delay = self.domain_dict[domain]["delay"]
+                with self.visit_lock: self.urls_to_visit.add(url)
+                logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
+            resp.raise_for_status()
+            return resp
 
         while self.proxy_manager.proxies:
             attempt += 1
@@ -169,8 +165,8 @@ class Crawler:
         language_denied = []
         for url in set(urls):
             # may remove interesting queries
-            parse = urlparse(url)
-            url = urljoin(url, parse.path)
+            # parse = urlparse(url)
+            # url = urljoin(url, parse.path)
 
             if not validators.url(url): continue
             t = mimetypes.guess_type(url)[0]
@@ -205,7 +201,7 @@ class Crawler:
             try: english = Language.get(headers['content-language']).language == 'en'
             except: pass
             html = self.download_url(url).text
-            if len(html.encode()) > 1e8: raise Exception(f"Page to big, Bytes: {len(html.encode())}, {url}")
+            if len(html.encode()) > 1e8: raise Exception(f"Page to large, Bytes: {len(html.encode())}, {url}")
             soup = BeautifulSoup(html, PARSER)
             english |= self.is_english(soup)
             if not english: raise BaseException

@@ -32,21 +32,17 @@ def predict_language_from_url(url: str) -> str:
     # Path prefix: /de/... or /pt-br/...
     if parsed.path:
         path_parts = parsed.path.split('/')
-        first = path_parts[0].lower()
+        first = path_parts[1].lower()
         if _LANG_REG_SHORT.match(first) or '-' in first:
             return normalize(first)
 
     # First subdomain segment: "de".example.com
     if ext.subdomain:
         sub_parts = ext.subdomain.split('.')
-        candidate = sub_parts[0].lower()
-        if _LANG_REG.match(candidate) and candidate not in _GENERIC:
-            return normalize(candidate)
-
-    # Country‐code TLD: example."de"
-    suffix = ext.suffix.lower()
-    if _LANG_REG.match(suffix) and suffix not in _GENERIC:
-        return normalize(suffix)
+        if len(sub_parts) == 1:
+            candidate = sub_parts[0].lower()
+            if _LANG_REG.match(candidate) and candidate not in _GENERIC:
+                return normalize(candidate)
 
     # else undefined
     return 'und'
