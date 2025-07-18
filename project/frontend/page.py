@@ -1,6 +1,5 @@
 import flet as ft
 import time
-import logging
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
@@ -125,7 +124,7 @@ class PageFactory:
             page.on_connect = on_connect
 
     def run(self, host: str, port: int):
-        ft.app(self.create_page, view=ft.AppView.WEB_BROWSER, host=host, port=port)
+        ft.app(self.create_page, view=ft.AppView.WEB_BROWSER, assets_dir="frontend/assets", host=host, port=port)
 
 
 
