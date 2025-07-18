@@ -106,7 +106,7 @@ class Document:
         }
 
 
-    def append_to_file(self, info_path: str = "indexed_docs.jsonl", html_path: str = "indexed_html.jsonl"):
+    def append_to_file(self, info_path: str = "data/indexed_docs.jsonl", html_path: str = "data/indexed_html.jsonl"):
         """ Append this document to a JSONL file."""
         with open(info_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(self.info_to_dict()) + "\n")
@@ -184,7 +184,7 @@ class DocumentCollection:
         return False
 
 
-    def write_collection_to_file(self, info_path: str = "indexed_docs.jsonl", html_path: str = "indexed_html.jsonl"):
+    def write_collection_to_file(self, info_path: str = "data/indexed_docs.jsonl", html_path: str = "data/indexed_html.jsonl"):
         """ Save the document collection to two files in JSONL format, one document per line."""
         with open(info_path, 'w', encoding='utf-8') as f:
             for _, doc in self.documents.items():

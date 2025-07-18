@@ -5,6 +5,7 @@ from langdetect import detect, LangDetectException
 from langcodes import Language
 from termcolor import colored
 from typing import Optional
+from pathlib import Path
 import validators
 import re
 import json
@@ -48,8 +49,8 @@ class Crawler:
     def __init__(self,
                  seed: list[str],
                  max_workers: int = multiprocessing.cpu_count() // 2,
-                 keywords: list = [r't\S{1,6}bingen', 'eberhard karl', 'palmer',
-                                   'lustnau', r's\S{1,6}dstadt', 'neckarinsel', 'bebenhausen'],
+                 keywords: list = [r't\S{1,6}binge', 'eberhard karl', 'palmer',
+                                   'lustnau', r's\S{1,6}dstadt', 'neckar island', 'bebenhausen'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = False,
                  auto_resume: bool = False,
@@ -60,8 +61,8 @@ class Crawler:
         self.user_agents = user_agents
         self.max_workers = max_workers
         self.auto_resume = auto_resume
-        self.state_file = state_file
-        self.doc_collection_file = doc_collection_file
+        self.state_file = (state_file)
+        self.doc_collection_file = (doc_collection_file)
 
         self.seed = seed if isinstance(seed, list) else [seed]
         self.visited_pages = {}
@@ -72,16 +73,17 @@ class Crawler:
         self.proxy_manager = ProxyManager(max_workers=max_workers) if use_proxies else None
 
         self.frontier_lock = threading.Lock()
-        # allowed hostname prefixes (e.g., language subdomains)
+        self.visited_lock = threading.Lock()
         self.domain_lock = threading.Lock()
+        self.doc_lock = threading.Lock()
+        self.write_lock = threading.Lock()
+
         self.domain_dict = defaultdict(lambda: defaultdict(int))
 
         # initialize document collection
         self.doc_collection = DocumentCollection()
         self.write_frequency = 10  # write to file every 10 documents
-        self.doc_collection_file = None
         self.pending_docs = []  # cache for documents waiting to be written
-        self.write_lock = threading.Lock()  # lock for thread-safe document write operations
 
         recrawl_interval = 60 * 60 * 24 * 7  # recrawl if site is older than 7 days
         self.recrawl_interval = recrawl_interval  # seconds
@@ -141,7 +143,8 @@ class Crawler:
             # save entire collection as backup
             if self.doc_collection_file and self.doc_collection.documents and backup:
                 backup_file = self.doc_collection_file.replace('.jsonl', '_complete.jsonl')
-                self.doc_collection.write_collection_to_file(backup_file)
+                html_path = self.doc_collection_file.replace('docs', 'html_complete')
+                self.doc_collection.write_collection_to_file(info_path=backup_file, html_path=html_path)
                 logging.info(f"Saved backup collection to {backup_file}")
 
     def get_random_headers(self):
@@ -230,6 +233,8 @@ class Crawler:
         with self.frontier_lock:
             existing_urls = {item[1] for item in self.frontier}
             if url in existing_urls: return False
+        
+        with self.visited_lock:
             if url in self.visited_pages: return False
 
         if self.doc_collection.get_document(url):
@@ -353,7 +358,11 @@ class Crawler:
             # tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
             # logging.debug(f"Full traceback:\n{''.join(tb_lines)}")
         finally:
-            with self.frontier_lock:
+            with self.domain_lock:
+                domain = self.get_domain(urlparse(url))
+                self.domain_dict[domain]['in_use'] = False
+
+            with self.visited_lock:
                 self.visited_pages[url] = {
                     "keywords_found": keywords_found,
                     "parent_url": parent_url,
@@ -396,9 +405,10 @@ class Crawler:
                 diff = post_time - prior_time
                 if diff < 2: time.sleep(2 - diff)
                 visiting = list(map(lambda x: x[2], futures))
-                with self.frontier_lock:
+                with self.visited_lock:
                     logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, '
                                          f'Visited: {len(self.visited_pages)}, Sites: {visiting[:20]} ...', 'green'))
+                    logging.info(colored(f'Domain dict size: {len(self.domain_dict)}', 'blue'))
                 futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
         self.cleanup_and_shutdown()
 
@@ -476,7 +486,7 @@ class Crawler:
         and remove from visited pages.
         """
         recrawl_interval = self.recrawl_interval
-        with self.lock:
+        with self.doc_lock:
             now = time.time()
             stale_docs = []
             for url, doc in self.doc_collection.documents.items():
