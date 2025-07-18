@@ -8,19 +8,21 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 txt_urls = [
-    "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text",
     "https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/proxies.txt",
 ]
+
 
 class ProxyManager:
     def __init__(
         self,
+        verbose=True,
         test_url='https://httpbin.org/ip',
         timeout=2,
         max_workers=20,
         cooldown=1.0,
         entry_ttl=86400
     ):
+        self.verbose = verbose
         self.test_url = test_url
         self.timeout = timeout
         self.max_workers = max_workers
@@ -110,7 +112,7 @@ class ProxyManager:
                 entry['quality'] = 0.7 * entry['quality'] + 0.3 * score
             else:
                 entry['fail_count'] += 1
-                logging.info(f"Proxy {proxy_url} failed {entry['fail_count']} time(s)")
+                if self.verbose: logging.info(f"Proxy {proxy_url} failed {entry['fail_count']} time(s)")
             if entry['fail_count'] >= 2:
                 logging.info(f"Dropping proxy {proxy_url} after {entry['fail_count']} failures")
                 self.all_proxies.pop(proxy_url, None)
