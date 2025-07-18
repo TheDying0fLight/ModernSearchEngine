@@ -48,6 +48,20 @@ class SearchEnginePage:
         )
         self.page.add(self.tabs)
 
+    def route_change(self, route):
+        """Searches if the rout is search other return to base route"""
+        template_route = ft.TemplateRoute(self.page.route)
+        if template_route.match('/search?:q'):
+            query = template_route.q.split('=')[1]
+            if not query.strip():
+                self.page.go('/')
+                return
+            self.navigate_to_search_tab()
+            self.search_tab.start_loading(query)
+            self.search(query)
+        else:
+            self.page.go('/')
+ 
     def navigate_to_search_tab(self):
         """Navigate to the search tab"""
         self.tabs.selected_index = 0
