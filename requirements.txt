@@ -61,6 +61,7 @@ multidict
 multiprocess
 nest-asyncio
 networkx
+nltk
 numpy
 packaging
 pandas
@@ -104,6 +105,7 @@ soupsieve
 stack-data
 sympy
 tabulate
+termcolor
 threadpoolctl
 tiktoken
 tldextract
