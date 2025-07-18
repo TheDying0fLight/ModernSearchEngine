@@ -1,15 +1,15 @@
-import re
-import tldextract
 from langcodes import Language
-import os
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Callable, Any
-import threading
-import socket
 from urllib.parse import urlparse
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 from urllib.robotparser import RobotFileParser
+import tldextract
+import threading
+import socket
+import os
+import re
 
 _LANG_REG = re.compile(r'^[a-z]{2,3}$', re.IGNORECASE)
 _LANG_REG_SHORT = re.compile(r'^[a-z]{2}$', re.IGNORECASE)
@@ -24,29 +24,30 @@ def predict_language_from_url(url: str) -> str:
 
     def normalize(code: str) -> str | None:
         try: return Language.get(code).to_tag()
-        except Exception: return None
+        except Exception: return 'und'
 
-    # 1) Path prefix: /de/... or /pt-br/...
-    path_parts = [p for p in parsed.path.split('/') if p]
-    if path_parts:
+    # keywords checks
+    if 'english' in url: return 'en'
+
+    # Path prefix: /de/... or /pt-br/...
+    if parsed.path:
+        path_parts = parsed.path.split('/')
         first = path_parts[0].lower()
         if _LANG_REG_SHORT.match(first) or '-' in first:
-            tag = normalize(first.replace('_', '-'))
-            if tag: return tag
+            return normalize(first)
 
-    # 2) First subdomain segment: "de".example.com
-    sub_parts = ext.subdomain.split('.') if ext.subdomain else []
-    if sub_parts:
-        candidate = sub_parts[-1].lower()
+    # First subdomain segment: "de".example.com
+    if ext.subdomain:
+        sub_parts = ext.subdomain.split('.')
+        print(sub_parts)
+        candidate = sub_parts[0].lower()
         if _LANG_REG.match(candidate) and candidate not in _GENERIC:
-            tag = normalize(candidate)
-            if tag: return tag
+            return normalize(candidate)
 
-    # 3) Country‐code TLD: example."de"
+    # Country‐code TLD: example."de"
     suffix = ext.suffix.lower()
     if _LANG_REG.match(suffix) and suffix not in _GENERIC:
-        tag = normalize(suffix)
-        if tag: return tag
+        return normalize(suffix)
 
     # else undefined
     return 'und'

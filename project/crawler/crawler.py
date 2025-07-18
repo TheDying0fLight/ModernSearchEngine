@@ -65,7 +65,7 @@ class Crawler:
         self.domain_dict = defaultdict(lambda: defaultdict(int))
 
         self.visited_pages = {}
-        self.urls_to_visit = defaultdict(set)
+        self.urls_to_visit = set()
         self.add_urls_to_visit(urls)
 
     def get_domain(self, parse: ParseResult): return ".".join(parse.hostname.split(".")[-2:])
@@ -169,8 +169,8 @@ class Crawler:
         language_denied = []
         for url in set(urls):
             # may remove interesting queries
-            # parse = urlparse(url)
-            # url = urljoin(url, parse.path)
+            parse = urlparse(url)
+            url = urljoin(url, parse.path)
 
             if not validators.url(url): continue
             t = mimetypes.guess_type(url)[0]
@@ -178,7 +178,7 @@ class Crawler:
             with self.visit_lock:
                 if url in self.urls_to_visit: continue
                 if url in self.visited_pages.keys(): continue
-            if predict_language_from_url(url) not in ["und", "en"]:
+            if predict_language_from_url(url) not in ["und", "en", "eu", "root"]:
                 language_denied.append(url)
                 continue
             if not self.is_useragent_allowed(url): continue
@@ -249,11 +249,11 @@ class Crawler:
                 post_time = time.time()
                 diff = post_time - prior_time
                 if diff < 2: time.sleep(2 - diff)
-                futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
                 visiting = list(map(lambda x: x[2], futures))
                 with self.visit_lock:
-                    logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}'
-                                         f'Visited: {len(self.visited_pages)}, Sites: {visiting}', 'green'))
+                    logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, '
+                                         f'Visited: {len(self.visited_pages)}, Sites: {visiting[:20]} ...', 'green'))
+                futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
         logging.info("Crawling complete.")
 
     def schedule_urls(self, urls: list[str], executor: TrackingThreadPoolExecutor):
