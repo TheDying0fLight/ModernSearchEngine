@@ -39,7 +39,6 @@ def predict_language_from_url(url: str) -> str:
     # First subdomain segment: "de".example.com
     if ext.subdomain:
         sub_parts = ext.subdomain.split('.')
-        print(sub_parts)
         candidate = sub_parts[0].lower()
         if _LANG_REG.match(candidate) and candidate not in _GENERIC:
             return normalize(candidate)
