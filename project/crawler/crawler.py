@@ -46,7 +46,7 @@ DEFAULT_DELAY = 1
 
 class Crawler:
     def __init__(self,
-                 seed: list,
+                 seed: list[str],
                  max_workers: int = multiprocessing.cpu_count() // 2,
                  keywords: list = [r't\S{1,6}bingen', 'eberhard karl', 'palmer',
                                    'lustnau', r's\S{1,6}dstadt', 'neckarinsel', 'bebenhausen'],
@@ -98,7 +98,7 @@ class Crawler:
             if self.doc_collection.add_document(doc):
                 self.pending_docs.append(doc)
                 thread_id = threading.current_thread().ident
-                logging.info(
+                logging.debug(
                     f"[Thread {thread_id}]: Added new document {doc.url} to cache. Cache size: {len(self.pending_docs)}")
 
                 # if write frequency reached, write to file
@@ -285,7 +285,7 @@ class Crawler:
         """Calculate relevance score based on URL and keywords."""
         if not self.keywords: return 0
 
-        score = sum(10 for kw in self.keywords if re.search(kw, url, re.IGNORECASE))
+        score = sum(10 for kw in self.keywords if re.search(kw, url.lower()))
 
         score += max(0, 40 - len(url))  # deeper paths get lower score
 
@@ -304,7 +304,7 @@ class Crawler:
             lang = detect(text)
             return lang == 'en'
         except LangDetectException:
-            logging.info("Language detection failed, assuming English")
+            logging.debug("Language detection failed, assuming English")
             return True
 
     def crawl(self, url: str, parent_url=None, recrawl=False):
@@ -324,10 +324,10 @@ class Crawler:
 
             soup = BeautifulSoup(html, PARSER)
             english |= self.is_english(soup)
-            if not english: raise Exception("Url not detected as English.")
+            if not english: raise BrokenPipeError("Url not detected as English.")
 
             keywords_found = any(regex.search(html.lower()) for regex in self.keywords)
-            if not keywords_found: raise Exception("No keywords found.")
+            if not keywords_found: raise BrokenPipeError("No keywords found.")
 
             doc = self.doc_collection.get_document(url)
             if recrawl and doc: doc._update_html(html)
@@ -337,12 +337,13 @@ class Crawler:
 
             self.add_document_to_cache(doc)
 
-            urls = set(self.get_linked_urls(url, html))
+            urls = set(self.get_linked_urls(url, soup))
             added = self.add_urls_to_frontier(urls, parent_url=url)
             with self.frontier_lock:
                 logging.info(f"Frontier size: {len(self.frontier)}, "
                              f"Added {added}/{len(urls)} URLs from {url}")
-
+        except BrokenPipeError as e:
+            logging.debug(f"Error crawling {url}: {e}")
         except Exception as e:
             logging.error(f"Error crawling {url}: {e}")
             # exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -357,7 +358,7 @@ class Crawler:
             doc = self.doc_collection.get_document(url)
             relevance = doc.relevance_score if doc else "no relevance score"
             with self.frontier_lock:
-                logging.info(
+                logging.debug(
                     f"Visited {len(self.visited_pages)} pages (english={english}, relevance={relevance}, URL: {url})")
 
     def run(self, amount: Optional[int] = None):
@@ -451,7 +452,7 @@ class Crawler:
             }
             with open(file_path, 'w') as f:
                 json.dump(state, f)
-            logging.info(f"Saved current state to {file_path}")
+            logging.debug(f"Saved current state to {file_path}")
 
     def load_state(self, state_file: str):
         """Load the frontier and visited pages from a file."""
