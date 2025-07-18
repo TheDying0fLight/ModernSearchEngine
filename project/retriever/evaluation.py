@@ -1,7 +1,8 @@
 import numpy as np
 import math
 
-def compute_metrics(eval_pred):
+
+def compute_metrics(eval_pred: tuple):
     logits, _ = eval_pred
     # Convert logits to similarity scores in [0,1]
     conf: np.ndarray = (logits + 1) / 2
@@ -25,7 +26,7 @@ def compute_metrics(eval_pred):
     metrics['min_rank_norm'] = ranks_pos.max() / M
 
     for p in [1, 2, 5, 10, 25, 50]:
-        metrics[f"recall@{p}%"] = np.mean(ranks_pos < max(min(N,M) * p / 100, 1))
+        metrics[f"recall@{p}%"] = np.mean(ranks_pos < max(min(N, M) * p / 100, 1))
 
     # Flatten positive (diagonal) and negative (off-diagonal) scores
     mask = np.tile(np.eye(M, dtype=bool), math.ceil(N / M)).T[:N]

@@ -1,26 +1,27 @@
 from model import SiglipStyleModel, ColSentenceModel
-from datasets import load_dataset
 import os
 from transformers import Trainer, TrainingArguments
 from callbacks import NotebookProgressCallbackNoTable
 from transformers.utils.notebook import NotebookProgressCallback
 from evaluation import compute_metrics
-import numpy as np
 import wandb
-from utils import get_train_and_test_data
+from utils import get_train_and_test_data, collate_fn
 
 # loss = "siglip"
 loss = "clip"
-batch_size = 64
+batch_size = 128
 # epochs = 2 * batch_size
-epochs = 1
+epochs = 10
 lr = 1e-6
-eval_batch = 256
+eval_batch = 250
+architecture = "Siglip"
 
-model = ColSentenceModel(loss_type=loss)
-dataset_name = "microsoft/ms_marco"
-dir_name = "v2.1"
-dataset = load_dataset(dataset_name, dir_name)
+models = {
+    "ColSent": ColSentenceModel,
+    "Siglip": SiglipStyleModel,
+}
+# model = RetrieverModel(loss_type=loss)
+model = models[architecture](loss_type=loss)
 
 data_paths = [
     ("microsoft/ms_marco", "v1.1"),
@@ -32,7 +33,7 @@ lr_n = "" if lr == 1e-7 else f"lr{lr:.0E}_"
 b_n = "" if batch_size == 2 else f"b{batch_size}_"
 
 model_name = model.model_name.split("/")[-1]
-model_path = f"{loss}/{model_name}/{b_n}{lr_n}{dataset_name}{dir_name}"
+model_path = f"{loss}/{architecture}/{model_name}/{b_n}{lr_n}{data_paths[0][0]}{data_paths[0][1]}"
 print(model_path)
 print(train_data)
 print(test_data)
@@ -60,17 +61,6 @@ training_args = TrainingArguments(
     report_to='wandb',
     # max_steps=1000,
 )
-
-def collate_fn(batch):
-    def get_relevant(passages):
-        passage = np.array(passages["passage_text"])[np.array(passages["is_selected"], bool)]
-        return passage[0] if len(passage) > 0 else ""
-    res = {
-        "query": [ex["query"] for ex in batch],
-        # "answer": [ex["answers"][0] if ex["answers"] else "" for ex in batch],
-        "answer": [get_relevant(ex["passages"]) for ex in batch],
-    }
-    return res
 
 trainer = Trainer(
     model,

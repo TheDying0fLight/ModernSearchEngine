@@ -12,7 +12,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class SiglipStyleModel(nn.Module):
-    def __init__(self, model_name="prajjwal1/bert-mini", loss_type="siglip"):
+    def __init__(self, model_name: str = "prajjwal1/bert-mini", loss_type: str = "siglip"):
         super().__init__()
         self.model_name = model_name
         self.loss_type = loss_type
@@ -21,10 +21,10 @@ class SiglipStyleModel(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1))
         self.to(device)
 
-    def tokenize(self, texts):
+    def tokenize(self, texts: str | list[str]):
         return self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt", max_length=512).to(device)
 
-    def forward(self, query, answer, return_loss=True):
+    def forward(self, query: str | list[str], answer: str | list[str], return_loss: bool = True):
         tok_query = self.tokenize(query)
         tok_answ = self.tokenize(answer)
         out_query = self.encoder(**tok_query).pooler_output
@@ -39,7 +39,7 @@ class SiglipStyleModel(nn.Module):
         else: loss = None
         return {"loss": loss, "logits": logits}
 
-    def siglip_loss(self, logits):
+    def siglip_loss(self, logits: torch.Tensor):
         sim = logits + self.bias
         eye = torch.eye(sim.size(0), device=sim.device)
         y = -torch.ones_like(sim) + 2 * eye
@@ -48,14 +48,14 @@ class SiglipStyleModel(nn.Module):
         loss = nll.mean()
         return loss
 
-    def load(self, path):
+    def load(self, path: str):
         state_dict = load_file(path, device)
         self.load_state_dict(state_dict, strict=False)
         return self
 
 
 class ColSentenceModel(nn.Module):
-    def __init__(self, model_name="prajjwal1/bert-mini", embed_size=128, loss_type="siglip"):
+    def __init__(self, model_name: str = "prajjwal1/bert-mini", embed_size: str = 128, loss_type: str = "siglip"):
         super().__init__()
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)

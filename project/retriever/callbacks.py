@@ -1,7 +1,9 @@
 from transformers.utils.notebook import NotebookProgressCallback, NotebookTrainingTracker
 
+
 class _NotebookTrainingTrackerNoTable(NotebookTrainingTracker):
     def write_line(self, values): pass
+
 
 class NotebookProgressCallbackNoTable(NotebookProgressCallback):
     def on_train_begin(self, args, state, control, **kwargs):
