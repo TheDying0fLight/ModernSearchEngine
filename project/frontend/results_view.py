@@ -74,7 +74,8 @@ class ResultsView(ft.Container):
                 on_button_click= lambda e: None,
             )
         else:
-            title = TabTitle(f"Search results for '{query}' ({len(results)} result{'s' if len(results) != 1 else ''})")
+            num_results = sum([len(res) for res in results])
+            title = TabTitle(f"Search results for '{query}' ({num_results} result{'s' if num_results != 1 else ''})")
             result_column = []
             for result_row in results:
                 result_column.append(ft.Container(

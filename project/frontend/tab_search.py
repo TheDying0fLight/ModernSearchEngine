@@ -30,7 +30,7 @@ class SearchTab(Tab):
                 self.search_bar,
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True)
 
-        self.advanced_options = AdvancedSearchOptions()
+        #self.advanced_options = AdvancedSearchOptions()
 
         # Create the tab container
         super().__init__(
@@ -38,7 +38,7 @@ class SearchTab(Tab):
             icon=ft.Icons.SEARCH,
             controls=[
                 self.header,
-                self.advanced_options,
+                #self.advanced_options,
                 self.loading_indicator,
                 self.results_view
             ],
