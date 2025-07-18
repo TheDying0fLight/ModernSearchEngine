@@ -88,7 +88,8 @@ class Crawler:
 
         self.shutdown_requested = False  # flag to signal shutdown
 
-    def get_domain(self, parse: ParseResult): return ".".join(parse.hostname.split(".")[-2:])
+    def get_domain(self, parse: ParseResult):
+        return ".".join(parse.hostname.split(".")[-2:]) if parse.hostname else ""
 
     def add_document_to_cache(self, doc: Document):
         """Thread-safe method to add document to cache and handle batch writing."""
@@ -154,7 +155,8 @@ class Crawler:
         text = BeautifulSoup(html, PARSER).get_text(separator=' ').lower()
         return any(m in text for m in markers)
 
-    def download_site(self, url: str, headers: bool = False):
+    def download_site(self, entry, headers: bool = False):
+        _, url, _, _ = entry
         last_exc = None
         attempt = 0
         domain = self.get_domain(urlparse(url))
@@ -177,7 +179,7 @@ class Crawler:
                 with self.domain_lock:
                     self.domain_dict[domain]["delay"] += 1
                     delay = self.domain_dict[domain]["delay"]
-                with self.frontier_lock: self.urls_to_visit.add(url)
+                with self.frontier_lock: heapq.heappush(self.frontier, entry)
                 logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
             resp.raise_for_status()
             return resp
@@ -307,18 +309,19 @@ class Crawler:
             logging.debug("Language detection failed, assuming English")
             return True
 
-    def crawl(self, url: str, parent_url=None, recrawl=False):
+    def crawl(self, entry):
         """Crawl a single URL, extract links, and add them to the frontier."""
+        _, url, parent_url, recrawl = entry
         keywords_found = False
         english = False
         logging.debug(f"Crawling {url}")
         if not parent_url: parent_url = "Seed"
 
         try:
-            headers = self.download_site(url, headers=True).headers
+            headers = self.download_site(entry, headers=True).headers
             try: english = Language.get(headers['content-language']).language == 'en'
             except: pass
-            html = self.download_site(url).text
+            html = self.download_site(entry).text
             if len(html.encode()) > 1e8:
                 raise Exception(f"Page to large, Bytes: {len(html.encode())}, {url}")
 
@@ -403,17 +406,16 @@ class Crawler:
         futures = set()
         with self.frontier_lock: frontier = self.frontier.copy()
         for entry in frontier:
-            _, next_url, parent_url, recrawl = entry
-            domain = self.get_domain(urlparse(next_url))
+            domain = self.get_domain(urlparse(entry[1]))
             with self.domain_lock:
                 if self.domain_dict[domain].get('in_use'): continue
                 self.domain_dict[domain]['in_use'] = True
 
             with self.frontier_lock: self.frontier.remove(entry)
             futures.add((
-                executor.submit(self.crawl, next_url, parent_url, recrawl),
+                executor.submit(self.crawl, entry),
                 time.time(),
-                next_url))
+                entry[1]))
         return futures
 
     def _can_resume(self) -> bool:
