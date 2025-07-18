@@ -53,6 +53,15 @@ class SiglipStyleModel(nn.Module):
         self.load_state_dict(state_dict, strict=False)
         return self
 
+    def embed(self, text, query=True):
+        tokens = self.tokenize(text)
+        out_text = self.encoder(**tokens).pooler_output
+        out_embed = out_text / out_text.norm(p=2, dim=-1, keepdim=True)
+        return out_embed
+
+    def resolve(self, query_embeddings, document_embeddings):
+        return query_embeddings @ document_embeddings.t()
+
 
 class ColSentenceModel(nn.Module):
     def __init__(self, model_name: str = "prajjwal1/bert-mini", embed_size: str = 128, loss_type: str = "siglip"):
@@ -93,12 +102,19 @@ class ColSentenceModel(nn.Module):
                 # shape after bmm (batch size, #doc_tokens, #query_tokens)
                 return torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2)
 
-    def custom_embed(self, sentences, idx_map):  # sentences structure: (batch x sentences) embeddings
+    def resolve(self, query_embeddings, document_embeddings):
+        return self.max_sim(document_embeddings, query_embeddings, sentence_wise=False)
+
+    def embed(self, text, query=True):  # sentences structure: (batch x sentences) embeddings
+        sentences, idx_map = self.extract_sentences(text)
         tokens = self.tokenizer(sentences, return_tensors="pt", padding=True,
                                 truncation=True, max_length=512).to(device)
         embeddings = self.bert_model(**tokens).pooler_output
         final_embeddings = torch.nn.functional.normalize(self.token_mapper(embeddings), dim=1)
-        return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True)
+        if query:
+            return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True).transpose(1, 2)
+        else:
+            return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True)
 
     def extract_sentences(self, texts):
         sentence_lists = []
@@ -112,11 +128,8 @@ class ColSentenceModel(nn.Module):
         return sentence_lists, idx_map
 
     def forward(self, query, answer, return_loss=True, sentence_wise=False):
-        query_sentences, query_idx_map = self.extract_sentences(query)
-        document_sentences, document_idx_map = self.extract_sentences(answer)
-        query_embeddings = self.custom_embed(query_sentences, query_idx_map)
-        query_embeddings = torch.transpose(query_embeddings, 1, 2)
-        document_embeddings = self.custom_embed(document_sentences, document_idx_map)
+        query_embeddings = self.embed(query, query=True)
+        document_embeddings = self.embed(answer, query=False)
         logits = self.max_sim(document_embeddings, query_embeddings, sentence_wise)
         if return_loss:
             match self.loss_type:
