@@ -19,6 +19,8 @@ import json
 import os
 import traceback
 import sys
+import socket
+from typing import Optional
 
 
 logging.basicConfig(
@@ -38,7 +40,7 @@ default_user_agents = [
 class Crawler:
     def __init__(self,
                  seed: list,
-                 max_workers= 1,  #multiprocessing.cpu_count()//2,
+                 max_workers= multiprocessing.cpu_count()//2,
                  keywords: list = [r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen'],
                  user_agents:list=default_user_agents,
                  use_proxies: bool = False,
@@ -51,13 +53,13 @@ class Crawler:
         self.keywords = keywords
         self.user_agents = user_agents
         self.max_workers = max_workers
-        self.auto_resume = auto_resume # set if crawler will write state to file and resume from it
+        self.auto_resume = auto_resume
         self.state_file = state_file
         self.doc_collection_file = doc_collection_file
 
         self.seed = seed if isinstance(seed, list) else [seed]
         self.visited_pages = {}
-        # Initialize as (priority, url, parent_url, recrawl) tuples - parent_url is None for seed URLs
+        # initialize as (priority, url, parent_url, recrawl) tuples - parent_url is None for seed URLs
         initial_urls = [(0.0, url, None, False) for url in (seed or [])]  # same start priority for all seed URLs
         self.frontier = initial_urls
         heapq.heapify(self.frontier)
@@ -65,9 +67,6 @@ class Crawler:
 
         self.lock = threading.Lock()
         # allowed hostname prefixes (e.g., language subdomains)
-        self.allowed_lang_prefixes = ['en.']
-        self.filtered_substrings = ['.php', 'File:', 'Special:', 'Talk:', 'Template']
-        self.domain_last_access = {}
         self.domain_lock = threading.Lock()
         self.visit_lock = threading.Lock()
         self.domain_dict = defaultdict(lambda: defaultdict())
@@ -88,6 +87,7 @@ class Crawler:
 
     def add_document_to_cache(self, doc: Document):
         """Thread-safe method to add document to cache and handle batch writing."""
+        should_save_state = False
         with self.write_lock:
             # try to add to collection
             if self.doc_collection.add_document(doc):
@@ -97,12 +97,15 @@ class Crawler:
 
                 # if write frequency reached, write to file
                 if len(self.pending_docs) >= self.write_frequency:
-                    self._write_pending_docs()
+                    self._write_pending_data()
+                    should_save_state = True
+        
+        if should_save_state: self.save_current_state(self.state_file)
 
 
 
-    def _write_pending_docs(self):
-        """Write pending documents to file. Must be called with write_lock held."""
+    def _write_pending_data(self):
+        """Write pending data to file. Must be called with write_lock held."""
         if not self.pending_docs or not self.output_file:
             return
             
@@ -110,11 +113,19 @@ class Crawler:
             # append all pending docs to file
             for doc in self.pending_docs:
                 self.doc_collection.add_document_and_save(doc, self.output_file)
+                full_doc = self.doc_collection.get_document(doc.url)
+                if full_doc:
+                    full_doc.html = "" # clear HTML to save memory
+                    self.doc_collection.documents[doc.url] = full_doc
+
 
             logging.info(f"Appended {len(self.pending_docs)} documents to {self.output_file}")
             self.pending_docs.clear()
+
+            # overwrite crawler state file with current state
+            # self.save_current_state(self.state_file)
         except Exception as e:
-            logging.error(f"Failed to write documents to file: {e}")
+            logging.error(f"Failed to write data to file: {e}")
 
 
 
@@ -123,7 +134,7 @@ class Crawler:
         with self.write_lock:
             # append any remaining pending documents
             if self.pending_docs:
-                self._write_pending_docs()
+                self._write_pending_data()
             
             # save entire collection as backup
             if self.output_file and self.doc_collection.documents and backup:
@@ -218,8 +229,29 @@ class Crawler:
         soup = BeautifulSoup(html, 'html.parser')
         for link in soup.find_all('a', href=True):
             href = link['href']
-            if href.startswith('/'): yield urljoin(url, href)
-            elif href.startswith('http'): yield href
+
+            useless = ["file:", "category:", "template:", "special:", "user:", "help",
+                        "user_talk:", "talk:", "template_talk:", "&diff=",
+                        "&oldid=", "&restore=", "&printable=", "action="]
+
+            if any(pattern in href.lower() for pattern in useless):
+                continue
+
+            media_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', 
+                        '.mp4', '.webm', '.ogg', '.mp3', '.wav']
+            
+            if any(href.endswith(ext) for ext in media_extensions):
+                continue
+
+            # convert to full URL if relative
+            full_url = ""
+            if href.startswith('/'): full_url = urljoin(url, href)
+            elif href.startswith('http'): full_url = href
+
+            if full_url:
+                # skip non-english wiki pages
+                if "wikipedia.org" in full_url and not "en.wikipedia.org" in full_url: continue
+                if self.should_crawl_url(full_url): yield full_url
 
 
 
@@ -231,37 +263,17 @@ class Crawler:
         # scoring based on keyword presence in URL
         score = sum(10 for kw in self.keywords if re.search(kw, url, re.IGNORECASE))
         
-        # additional scoring based on URL structure
-        parsed = urlparse(url)
-        if parsed.hostname:
-            score += 1
+        score += max(0, 40 - len(url))  # deeper paths get lower score
         
-        # score shorter URLs higher (prefer top-level pages)
-        path_parts = [p for p in parsed.path.split('/') if p]
-        path_depth = len(path_parts)
-        
-        if path_depth == 0:  # homepage
-            score += 5
-        elif path_depth == 1:  # Top-level sections
-            score += 3
-        elif path_depth == 2:  # Second-level pages
-            score += 2
-        elif path_depth == 3:  # Third-level pages
-            score += 1
-        
-        # add half the score of the parent
+        # add half the score of the parents content
         if parent_url:
             parent_doc = self.doc_collection.get_document(parent_url)
             if parent_doc:
                 score += parent_doc.relevance_score * .5
-        
-        # bump if URL is https
-        if parsed.scheme == 'https':
-            score += 1
+
         
         thread_id = threading.current_thread().ident
         logging.debug(f"[Thread {thread_id}]: Relevance score for {url}: {score}")
-
         return score
 
 
@@ -269,15 +281,42 @@ class Crawler:
     def add_url_to_frontier(self, url, priority=1, parent_url=None, recrawl=False):
         """Add URL to visit with given priority and parent URL. Lower values = higher priority."""
         with self.lock:
-            # check if URL is already visited
-            if url not in self.visited_pages:
-                # check if URL is not already in the heap
-                existing_urls = {item[1] for item in self.frontier}
-                if url not in existing_urls:
-                    # priority is negative of relevance score
-                    priority = -self.relevance_score(url, parent_url)
-                    heapq.heappush(self.frontier, (priority, url, parent_url, recrawl))
+            existing_urls = {item[1] for item in self.frontier}
+            if url in existing_urls:
+                return
 
+            priority = -self.relevance_score(url, parent_url)
+            heapq.heappush(self.frontier, (priority, url, parent_url, recrawl))
+
+
+    def should_crawl_url(self, url):
+        """Check if the URL should be crawled based on robots.txt and other criteria."""
+        
+        if url in self.visited_pages:
+            return False
+
+        # check if URL is a duplicate content
+        doc = self.doc_collection.get_document(url)
+        if doc and doc.content_hash in self.doc_collection.content_hashes:
+            return False
+        
+        # Skip file pages entirely
+        if 'file' in url.lower():
+            return False
+        
+        # skip wikimedia commons
+        if 'commons.wikimedia.org' in url.lower():
+            return False
+        
+        # skip mobile versions
+        if 'm.wikipedia.org' in url.lower() or '.m.' in url.lower():
+            return False
+        
+        if not self.is_useragent_allowed(url):
+            logging.debug(f"URL {url} is disallowed by robots.txt")
+            return False
+        
+        return True
 
 
     def is_useragent_allowed(self, url: str):
@@ -285,18 +324,36 @@ class Crawler:
         parse = urlparse(url)
         domain = parse.hostname
         path = parse.path
-        url = f"{parse.scheme}://{parse.netloc}"
+        base_url = f"{parse.scheme}://{parse.netloc}"
         with self.domain_lock:
-            try: return self.domain_dict[domain]['robot']('*', path)
-            except: pass
-            robot = urobot.RobotFileParser()
-            robot.set_url(url + "/robots.txt")
-            p = multiprocessing.Process(target=robot.read)
-            p.start()
-            p.join(1)
-            if p.is_alive:self.domain_dict[domain]['robot'] = (lambda x, y: True)
-            else: self.domain_dict[domain]['robot'] = robot.can_fetch
-            return self.domain_dict[domain]['robot']('*', path)
+            if domain not in self.domain_dict:
+                self.domain_dict[domain]['robot'] = None
+                self.domain_dict[domain]['last_access'] = 0
+
+            if "robot" in self.domain_dict[domain]:
+                if self.domain_dict[domain]['robot'] is not None:
+                    cashed_robot = self.domain_dict[domain]['robot']
+                    if cashed_robot:
+                        return cashed_robot('*', path)
+                    else:
+                        return True  # no robot file found, assume allowed
+
+            try:
+                robot = urobot.RobotFileParser()
+                robot.set_url(base_url + "/robots.txt")
+
+                old_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(2.0)  # set a short timeout for robots.txt
+
+                robot.read()
+                socket.setdefaulttimeout(old_timeout)  # restore original timeout
+
+                self.domain_dict[domain]['robot'] = robot.can_fetch
+                return robot.can_fetch('*', path)
+            except Exception as e:
+                logging.error(f"Failed to fetch robots.txt for {domain} {e}")
+                self.domain_dict[domain]['robot'] = None
+                return True
 
 
 
@@ -307,7 +364,7 @@ class Crawler:
             lang = detect(text)
             return lang == 'en'
         except LangDetectException:
-            logging.info("Language detection failed, assuming English")
+            logging.debug("Language detection failed, assuming English")
             return True
 
 
@@ -325,13 +382,8 @@ class Crawler:
             logging.info(f"Document collection file {self.doc_collection_file} not found. Cannot resume.")
             return False
 
-        # check if state file is recent (e.g., less than 30 days old)
         stat = os.stat(self.state_file)
         age_hours = (time.time() - stat.st_mtime) / 3600
-        if age_hours > 30 * 24:  # state too old, start fresh
-            logging.info(f"Previous state is {age_hours:.1f} hours old, starting fresh crawl")
-            return False
-        
         logging.info(f"Found recent crawler state ({age_hours:.1f} hours old)")
         return True
     
@@ -366,10 +418,14 @@ class Crawler:
         with self.write_lock:
             with open(state_file, 'r') as f:
                 state = json.load(f)
-                self.frontier = state.get('frontier', [])
+
+                frontier_data = state.get('frontier', [])
+                self.frontier = [tuple(item) for item in frontier_data if isinstance(item, list) and len(item) == 4]
                 heapq.heapify(self.frontier)
+
                 self.visited_pages = state.get('visited_pages', {})
             logging.info(f"Loaded crawler state from {state_file}")
+            logging.info(f"Frontier size: {len(self.frontier)}, Visited pages: {len(self.visited_pages)}")
 
 
 
@@ -398,14 +454,12 @@ class Crawler:
     def crawl(self, url, parent_url=None, recrawl=False):
         """Crawl a single URL, extract links, and add them to the frontier."""
         thread_id = threading.current_thread().ident
-        logging.info(f"[Thread {thread_id}] >>> ENTERING crawl() for {url}")
+        # logging.info(f"[Thread {thread_id}] >>> ENTERING crawl() for {url}")
         keywords_found = False
         english = False
-        # start_time = time.time()
         
         try:
             html = self.download_sitehtml(url)
-            # load_time_ms = (time.time() - start_time) * 1000
             
             english = self.is_english(html)
             if not english:
@@ -415,44 +469,37 @@ class Crawler:
             text_lower = html.lower()
             keywords_found = any(kw in text_lower for kw in self.keywords)
             
-            # initialize Document object
+
+            if not keywords_found:
+                logging.info(f"Page {url} skipped: no keywords found.")
+                return
+
             if not parent_url:
                 parent_url = "Seed"
             
             if not recrawl:
                 doc = Document(url=url, html=html, parent_url=parent_url)
             else:
-                # if recrawling, load existing document to update metrics
+                # if recrawling, try to load existing document to update metrics
                 doc = self.doc_collection.get_document(url)
                 if not doc:
                     logging.warning(f"Recrawl requested for {url} but no existing document found.")
-                    return
+                    doc = Document(url=url, html=html, parent_url=parent_url)
                 else:
                     doc._update_html(html)
 
-            # update metrics using the stored HTML
             doc.update_metrics()
             
-            # add document to cache
             self.add_document_to_cache(doc)
-
 
             for linked_url in set(self.get_linked_urls(url, html)):
                 self.add_url_to_frontier(linked_url, parent_url=url)
-
-            # If keywords found, add linked URLs for further crawling
-            # if keywords_found:
-            #     for linked_url in set(self.get_linked_urls(url, html)):
-            #         self.add_url_to_frontier(linked_url, priority=1, parent_url=url)
-            # else:
-            #     logging.info(f"Page {url} skipped for link extraction: no keywords found.")
                 
         except Exception as e:
-            # logging.error(f"Error crawling {url}: {e}")
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
             logging.error(f"Error crawling {url}: {e}")
-            logging.error(f"Full traceback:\n{''.join(tb_lines)}")
+            # exc_type, exc_value, exc_traceback = sys.exc_info()
+            # tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+            # logging.debug(f"Full traceback:\n{''.join(tb_lines)}")
         finally:
             with self.lock:
                 if parent_url:
@@ -461,15 +508,16 @@ class Crawler:
                         "parent_url": parent_url,
                     }
                     thread_id = threading.current_thread().ident
-                    logging.info(f"[Thread {thread_id}]: Visited {len(self.visited_pages)} pages (Visited {url}, english={english}, keywords_found={keywords_found})")
+                    doc = self.doc_collection.get_document(url)
+                    relevance = doc.relevance_score if doc else "no relevance score"
+                    logging.info(f"[Thread {thread_id}]: Visited {len(self.visited_pages)} pages (Visited {url}, english={english}, relevance={relevance})")
 
 
 
-    def run(self, amount=None, output_file="crawled_documents.jsonl"):
+    def run(self, amount: Optional[int]=None, output_file="indexed_docs.jsonl"):
         """Run the crawler, processing URLs in priority order."""
         self.output_file = output_file
         
-        # check for auto-resume possibility
         if self.auto_resume and self._can_resume():
             logging.info(f"Auto-resuming from previous state: {self.state_file}")
             try:
@@ -479,13 +527,15 @@ class Crawler:
             
             try:
                 self.doc_collection.load_collection_from_file(self.doc_collection_file)
-                # add stale documents back to frontier for re-crawling
                 self.add_stale_docs_to_frontier()
             except Exception as e:
                 logging.warning(f"Failed to load document collection: {e}. Starting fresh crawl.")
                 self.doc_collection = DocumentCollection()
             
             print(self.get_crawling_stats())
+            if isinstance(self.visited_pages, dict) and isinstance(amount, int):
+                amount += len(self.visited_pages)
+                
         
         # start_url_amt = len(self.visited_pages)
         try:

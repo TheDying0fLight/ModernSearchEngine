@@ -1,13 +1,12 @@
 import time
 from dataclasses import dataclass, field
 import hashlib
-from typing import List, Dict, Set, Optional, Any
+from typing import List, Dict, Optional, Any
 from urllib.parse import urlparse
 import logging
 import json
 from bs4 import BeautifulSoup
-import numpy as np
-import math
+import re
 
 
 @dataclass
@@ -55,6 +54,7 @@ class Document:
 
         if self.html:
             self.update_metrics()
+        if self.content_hash == "":
             self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
 
 
@@ -84,21 +84,12 @@ class Document:
         self.last_crawl_timestamp = time.time()
         self.crawl_frequency += 1
 
-        # metas = soup.find_all("meta")
-        # meta_desc_tags = [meta.get('content', '') for meta in metas 
-        #           if meta.get('name', '').lower() == 'description']
-
-        # self.meta_description = meta_desc_tags[0] if meta_desc_tags else ""
-
-        keyword_count = 0
-        for keyword in self.relevant_keywords:
-            if keyword.lower() in self.get_content().lower():
-                keyword_count += self.get_content().lower().count(keyword.lower())
+        keyword_count = sum(1 for kw in self.relevant_keywords if re.search(kw, self.url, re.IGNORECASE))
 
         if keyword_count == 0:
-            self.relevance_score -= 10 # reduce score if no keywords found
+            self.relevance_score -= 10
         else:
-            self.relevance_score += math.ceil(np.log(keyword_count))
+            self.relevance_score += keyword_count
 
 
     def is_duplicate(self, other: 'Document') -> bool:
@@ -114,12 +105,14 @@ class Document:
             "subdomain": parsed_url.hostname.split('.')[0] if parsed_url.hostname else "",
         }
 
-    
-    def append_to_file(self, file_path: str):
+
+    def append_to_file(self, info_path: str = "indexed_docs.jsonl", html_path: str = "indexed_html.jsonl"):
         """ Append this document to a JSONL file."""
-        with open(file_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(self.to_dict()) + "\n")
-        logging.info(f"Document {self.url} appended to {file_path}")
+        with open(info_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(self.info_to_dict()) + "\n")
+        # logging.info(f"Document {self.url} appended to {info_path}")
+        with open(html_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"html": self.html}) + "\n")
 
 
     def load_from_dict(self, data: Dict):
@@ -127,11 +120,11 @@ class Document:
             if hasattr(self, key):
                 setattr(self, key, value)
         
-        # Recalculate derived fields
-        self.__post_init__()
+        # # Recalculate derived fields
+        # self.__post_init__()
     
 
-    def to_dict(self) -> Dict:
+    def info_to_dict(self) -> Dict:
         return {
             "url": self.url,
             "title": self.title,
@@ -149,8 +142,7 @@ class Document:
             "parent_url": self.parent_url,
             "relevance_score": self.relevance_score,
             "last_crawl_timestamp": self.last_crawl_timestamp,
-            "embedding": self.embedding.tolist() if self.embedding is not None else None,
-            "html": self.html
+            "embedding": self.embedding.tolist() if self.embedding is not None else None
         }
 
 
@@ -160,21 +152,22 @@ class DocumentCollection:
         self.documents: Dict[str, Document] = {}
         self.content_hashes: Dict[str, str] = {}
         self.domain_documents: Dict[str, List[str]] = {}
+        self.parent_urls: Dict[str, str] = {}
 
 
     def add_document(self, doc: Document) -> bool:
-        # Check if document content already in collection
+        # check if document content already in collection
         if doc.content_hash in self.content_hashes:
             existing_url = self.content_hashes[doc.content_hash]
             if existing_url != doc.url:
                 logging.warning(f"Duplicate content detected: {doc.url} has same content as {existing_url}")
                 return False
 
-        # Add to documents and content_hashes dicts
+        # add to documents and content_hashes dicts
         self.documents[doc.url] = doc
         self.content_hashes[doc.content_hash] = doc.url
 
-        # Update domain documents
+        # update domain documents
         if doc.domain not in self.domain_documents:
             self.domain_documents[doc.domain] = []
         if doc.url not in self.domain_documents[doc.domain]:
@@ -191,31 +184,57 @@ class DocumentCollection:
         return False
 
 
-    def write_collection_to_file(self, file_path: str = "indexed_docs.jsonl"):
-        """ Save the document collection to a file in JSONL format, one document per line."""
-        with open(file_path, 'w', encoding='utf-8') as f:
-            for url, doc in self.documents.items():
-                f.write(json.dumps(doc.to_dict()) + "\n")
-        logging.info(f"Saved {len(self.documents)} documents to {file_path}")
+    def write_collection_to_file(self, info_path: str = "indexed_docs.jsonl", html_path: str = "indexed_html.jsonl"):
+        """ Save the document collection to two files in JSONL format, one document per line."""
+        with open(info_path, 'w', encoding='utf-8') as f:
+            for _, doc in self.documents.items():
+                f.write(json.dumps(doc.info_to_dict()) + "\n")
+        logging.info(f"Saved {len(self.documents)} documents to {info_path}")
+
+        with open(html_path, 'w', encoding='utf-8') as f:
+            for _, doc in self.documents.items():
+                f.write(json.dumps({"html": doc.html}) + "\n")
+        logging.info(f"Saved {len(self.documents)} documents to {html_path}")
 
 
     def load_collection_from_file(self, file_path: str):
         """ Load the document collection from a file in JSONL format, one document per line."""
         try:
+            logging.info(f"Loading document collection from {file_path}")
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
-                    if line:  # Skip empty lines
-                        doc_data = json.loads(line)
+                    if line:
+                        doc_dict = json.loads(line)
                         doc = Document(url="")
-                        doc.load_from_dict(doc_data)
-                        self.add_document(doc)
+                        doc.load_from_dict(doc_dict)
+                        self.documents[doc.url] = doc
             logging.info(f"Loaded {len(self.documents)} documents from {file_path}")
         except Exception as e:
             logging.error(f"Failed to load document collection from {file_path}: {e}")
 
+
+    def load_htmls_from_file(self, file_path: str):
+        """ Load HTML content from a file in JSONL format, one document per line."""
+        try:
+            logging.info(f"Loading HTML content from {file_path}")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        html_dict = json.loads(line)
+                        url = html_dict.get("url", "")
+                        html = html_dict.get("html", "")
+                        if url in self.documents:
+                            self.documents[url].html = html
+            logging.info(f"Loaded HTML content for {len(self.documents)} documents from {file_path}")
+        except Exception as e:
+            logging.error(f"Failed to load HTML content from {file_path}: {e}")
+
+
     def get_document(self, url: str) -> Optional[Document]:
         return self.documents.get(url)
+
 
     def remove_document(self, url: str):
         if url in self.documents:
