@@ -51,14 +51,12 @@ class FavoritesTab(Tab):
     def add_favorite(self, result: ResultContainer):
         """Add a document to favorites"""
         # Check if already in favorites
-        print("here")
         if any(fav.url == result.url for fav in self.favorites):
             "remove"
             return False
 
         # Add timestamp
         self.favorites.insert(0, Favorite(result, datetime.now().strftime("%m/%d/%Y")))
-        print(self.favorites)
         self.update_favorites_list()
         return True
 

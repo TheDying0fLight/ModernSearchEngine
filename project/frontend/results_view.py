@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import flet as ft
-from .components import ResultContainer, EmptyState
+from .components import ResultContainer, EmptyState, ResultTitle
 from .tab import TabTitle
 
 @dataclass
@@ -33,7 +33,9 @@ class ResultCard(ResultContainer):
             source=self.result_data.source,
             metadata=[self.result_data.date, f"{self.result_data.pages} pages"],
             button=self.favorite_button,
-            on_click=lambda e, result_data=result_data: on_click_callback(result_data)
+            on_click=lambda e, result_data=result_data: on_click_callback(result_data),
+            width=300,
+            max_hight=300,
         )
 
     def toggle_favorite(self, e):
@@ -61,7 +63,7 @@ class ResultsView(ft.Container):
             visible=False
         )
 
-    def show_results(self, query, results: list[Result]):
+    def show_results(self, query, results: list[list[Result]]):
         if (not results) or len(results) == 0:
             self.content = results_component = EmptyState(
                 icon=ft.Icons.SEARCH_OFF,
@@ -73,14 +75,24 @@ class ResultsView(ft.Container):
             )
         else:
             title = TabTitle(f"Search results for '{query}' ({len(results)} result{'s' if len(results) != 1 else ''})")
-            results_component = ft.Column([
-                ResultCard(
-                    result_data=result,
-                    on_click_callback=self.on_result_click,
-                    on_favorite_callback=self.on_favorite_toggle
-                ) for result in results],
-                scroll=ft.ScrollMode.AUTO,
-                spacing=0)
+            result_column = []
+            for result_row in results:
+                result_column.append(ft.Container(
+                    ft.Column([
+                        ResultTitle(f"Results similar to '{result_row[0].title}'"),
+                        ft.Row([
+                            ResultCard(
+                                result_data=result,
+                                on_click_callback=self.on_result_click,
+                                on_favorite_callback=self.on_favorite_toggle
+                            ) for result in result_row],
+                            scroll=ft.ScrollMode.ALWAYS,
+                            spacing=10,
+                            expand=True)
+                        ], spacing=10),
+                    padding=20)
+                )
+            results_component = ft.Column(result_column, scroll=ft.ScrollMode.ALWAYS, spacing=20)
             self.content = ft.Column([title, results_component])
         self.visible = True
         self.update()

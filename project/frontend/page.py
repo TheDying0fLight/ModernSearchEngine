@@ -108,14 +108,13 @@ class SearchEnginePage:
                 relevant_results.append(result)
 
         # Return relevant results or all results if no specific matches
-        return relevant_results if relevant_results else all_results[:3]
+        return [relevant_results if relevant_results else all_results[:3] for _ in range(3)]
 
 
 
 class PageFactory:
     """Creates new pages of type `SearchEnginePage`"""
     def __init__(self):
-        logging.disable()
         pass
 
     def create_page(self, page: ft.Page):
