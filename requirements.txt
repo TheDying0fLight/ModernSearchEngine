@@ -3,3 +3,4 @@ regex
 flet
 langdetect
 bs4
+requests
