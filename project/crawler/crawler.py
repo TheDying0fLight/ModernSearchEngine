@@ -44,6 +44,7 @@ default_user_agents = [
 
 PARSER = "lxml"
 DEFAULT_DELAY = 1
+TIMEOUT = 10
 
 
 class Crawler:
@@ -180,7 +181,7 @@ class Crawler:
             self.domain_dict[domain]['last_access'] = time.time()
 
         if not self.use_proxies:
-            resp = request_fn(url, headers=self.get_random_headers(), timeout=3)
+            resp = request_fn(url, headers=self.get_random_headers(), timeout=TIMEOUT)
             if resp.status_code == 429:
                 with self.domain_lock:
                     self.domain_dict[domain]["delay"] += 1
@@ -198,7 +199,7 @@ class Crawler:
             headers = self.get_random_headers()
             start = time.time()
             try:
-                resp = request_fn(url, proxies=proxies, headers=headers, timeout=3)
+                resp = request_fn(url, proxies=proxies, headers=headers, timeout=TIMEOUT)
                 text = resp.text
                 elapsed = time.time() - start
                 if 400 <= resp.status_code < 600:
@@ -230,15 +231,12 @@ class Crawler:
         useless = ["file:", "category:", "template:", "user:", "help",
                    "user_talk:", "talk:", "template_talk:", "&diff=",
                    "&oldid=", "&restore=", "&printable=", "action="]
-
         if any(pattern in url.lower() for pattern in useless): return False
 
         with self.frontier_lock: existing_urls = {item[1] for item in self.frontier}
         if url in existing_urls: return False
-
         with self.visited_lock:
             if url in self.visited_pages: return False
-
         if self.doc_collection.get_document(url):
             return False
 
@@ -247,7 +245,6 @@ class Crawler:
             return False
 
         if not validators.url(url): return False
-
         if predict_language_from_url(url) not in ["und", "en", "eu", "root"]:
             return False
 
@@ -257,7 +254,6 @@ class Crawler:
         if not self.is_useragent_allowed(url):
             logging.debug(f"URL {url} is disallowed by robots.txt")
             return False
-
         return True
 
     def is_useragent_allowed(self, url: str):
@@ -293,9 +289,7 @@ class Crawler:
     def relevance_score(self, url, parent_url=None):
         """Calculate relevance score based on URL and keywords."""
         if not self.keywords: return 0
-
         score = sum(10 for kw in self.keywords if re.search(kw, url.lower()))
-
         score += max(0, 40 - len(url))  # deeper paths get lower score
 
         if parent_url:
@@ -416,6 +410,7 @@ class Crawler:
         futures = set()
         with self.frontier_lock: frontier = self.frontier.copy()
         for entry in frontier:
+            if len(futures) > self.max_workers * 2: break
             domain = self.get_domain(urlparse(entry[1]))
             with self.domain_lock:
                 if self.domain_dict[domain].get('in_use'): continue
@@ -454,10 +449,13 @@ class Crawler:
 
     def save_current_state(self, file_path: str = "crawler_state.json"):
         """Save the current frontier and visited pages to a file."""
-        with self.visited_lock:  state = {'visited_pages': self.visited_pages}
-        with self.frontier_lock: state['frontier'] = list(self.frontier)
+        with self.visited_lock, self.frontier_lock:
+            state = {
+                "visited_pages": list(self.visited_pages),
+                "frontier": list(self.frontier),
+            }
         with self.write_lock:
-            with open(file_path, 'w') as f: json.dump(state.copy(), f)
+            with open(file_path, 'w') as f: json.dump(state, f)
             logging.debug(f"Saved current state to {file_path}")
 
     def load_state(self, state_file: str):
