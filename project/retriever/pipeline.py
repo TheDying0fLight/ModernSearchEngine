@@ -1,4 +1,4 @@
-from model import RetrieverModel, ColSentenceModel
+from model import SiglipStyleModel, ColSentenceModel
 from datasets import load_dataset
 import os
 from transformers import Trainer, TrainingArguments
