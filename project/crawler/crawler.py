@@ -43,7 +43,7 @@ default_user_agents = [
 
 PARSER = "lxml"
 DEFAULT_DELAY = 1
-TIMEOUT = 10
+TIMEOUT = 5
 STATE_FILE = "crawler_state.json"
 
 class Crawler:
@@ -296,7 +296,7 @@ class Crawler:
 
             priority = -self.relevance_score(url, parent_url)
             with self.frontier_lock:
-                self.frontier.append(priority, url, parent_url, recrawl)
+                self.frontier.append((priority, url, parent_url, recrawl))
             added += 1
         return added
 
@@ -401,6 +401,15 @@ class Crawler:
 
         with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
+            def update_futures():
+                visiting = list(map(lambda x: x[2], futures))
+                with self.visited_lock: amt_visited     = len(self.visited_pages)
+                with self.domain_lock:  len_domain_dict = len(self.domain_dict)
+                logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, Domain dict size: {len_domain_dict}, '
+                                    f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
+                filtered = set(filter(lambda f: f[0].done(), futures))
+                futures.difference_update(filtered)
+
             try:
                 while True:
                     prior_time = time.time()
@@ -412,14 +421,11 @@ class Crawler:
                     post_time = time.time()
                     diff = post_time - prior_time
                     if diff < 2: time.sleep(2 - diff)
-                    visiting = list(map(lambda x: x[2], futures))
-                    with self.visited_lock: amt_visited     = len(self.visited_pages)
-                    with self.domain_lock:  len_domain_dict = len(self.domain_dict)
-                    logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, Domain dict size: {len_domain_dict}, '
-                                        f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
-                    filtered = set(filter(lambda f: f[0].done(), futures))
-                    futures.difference_update(filtered)
+                    update_futures()
             finally:
+                while futures:
+                    time.sleep(2)
+                    update_futures()
                 self.cleanup_and_shutdown()
 
     def schedule_urls(self, executor: TrackingThreadPoolExecutor):
