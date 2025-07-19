@@ -7,6 +7,8 @@ from transformers.models.clip.modeling_clip import clip_loss
 import nltk
 import math
 import numpy as np
+import re
+from embedding import Embedding
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -64,7 +66,7 @@ class SiglipStyleModel(nn.Module):
 
 
 class ColSentenceModel(nn.Module):
-    def __init__(self, model_name: str = "prajjwal1/bert-mini", embed_size: str = 128, loss_type: str = "siglip"):
+    def __init__(self, model_name: str = "prajjwal1/bert-mini", embed_size: int = 128, loss_type: str = "siglip", data_path=""):
         super().__init__()
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -73,6 +75,7 @@ class ColSentenceModel(nn.Module):
         self.loss_type = loss_type
         nltk.download('punkt_tab')  # install the sentence level tokenizer
         self.to(device)
+        self.data_path = data_path
     """
     def loss_function(self, predictions, gt_labels):
         true_labels_mask = gt_labels.bool()
@@ -82,7 +85,7 @@ class ColSentenceModel(nn.Module):
     # Intended tensor shapes:
     # doc_tokens: (batch_size, doc tokens (num sentences) -> may have padding, embedding size)
     # query_tokens: (batch_size, embedding size, query tokens (num sentences) -> may have padding)
-
+    # TODO: rewrite to work with Embedding Class
     def max_sim(self, doc_tokens, query_tokens, sentence_wise, full_mat=True):
         if full_mat:
             desired_query_shape = (query_tokens.shape[0], doc_tokens.shape[0],
@@ -105,16 +108,24 @@ class ColSentenceModel(nn.Module):
     def resolve(self, query_embeddings, document_embeddings):
         return self.max_sim(document_embeddings, query_embeddings, sentence_wise=False)
 
-    def embed(self, text, query=True):  # sentences structure: (batch x sentences) embeddings
-        sentences, idx_map = self.extract_sentences(text)
-        tokens = self.tokenizer(sentences, return_tensors="pt", padding=True,
-                                truncation=True, max_length=512).to(device)
-        embeddings = self.bert_model(**tokens).pooler_output
-        final_embeddings = torch.nn.functional.normalize(self.token_mapper(embeddings), dim=1)
-        if query:
-            return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True).transpose(1, 2)
-        else:
-            return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True)
+    def embed(self, text, query=True, batch_size=100): # sentences structure: (batch x text) embeddings
+        embedding_obj = Embedding(self.data_path)
+        start_idx = 0
+        while start_idx < len(text):
+            end_idx = min(start_idx+batch_size,len(text))
+            batch = text[start_idx:end_idx]
+            start_idx = end_idx
+
+            sentences, idx_map = self.extract_sentences(batch)
+            tokens = self.tokenizer(sentences, return_tensors="pt", padding=True, truncation=True, max_length=512).to(device)
+            embeddings = self.bert_model(**tokens).pooler_output
+            final_embeddings = torch.nn.functional.normalize(self.token_mapper(embeddings),dim=1)
+            if query:
+                embedded_batch = torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True).transpose(1, 2)
+            else:
+                embedded_batch = torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True)
+            embedding_obj.add(embedded_batch)
+        return embedding_obj
 
     def extract_sentences(self, texts):
         sentence_lists = []
@@ -177,16 +188,17 @@ class BM25():
         doc_freqs = {}
         for document in documents:
             words = nltk.tokenize.word_tokenize(document)
+            words = [re.sub(r'[^\w\s]', '', word) for word in words if re.sub(r'[^\w\s]', '', word)] # regex courtesy of G4G
             doc_lengths.append(len(words))
             word_bag, doc_freqs = self.bag_words(words, doc_freqs)
             word_bags.append(word_bag)
         idfs = self.calc_idf(doc_freqs, len(doc_lengths))
-        if doc_lengths > 0:
-            avgdl = sum(doc_lengths) / len(doc_lengths)
+        if len(doc_lengths) > 0:
+            avgdl = sum(doc_lengths)/len(doc_lengths)
         else:
             avgdl = 0
-        return word_bags, idfs, avgdl
-
+        return word_bags, idfs, avgdl, doc_lengths
+    
     def calc_idf(self, doc_freqs, num_docs):
         idfs = {}
         for term in doc_freqs.keys():
@@ -194,22 +206,31 @@ class BM25():
         return idfs
 
     def preprocess(self, documents):
-        self.documents = documents  # order of documents determines the implicit indexing
-        word_bags, idfs, avgdl = self.bag_documents(documents)
+        self.documents = documents # order of documents determines the implicit indexing
+        word_bags, idfs, avgdl, doc_lenghts = self.bag_documents(documents)
         self.word_bags = word_bags
         self.idfs = idfs
         self.avgdl = avgdl
+        self.doc_lengths = doc_lenghts
 
     def calculate_rels(self, query):
         query_terms = nltk.tokenize.word_tokenize(query)
         relevance_list = []
         for doc_idx in range(len(self.word_bags)):
-            relevance_list.appen(self.get_relevance(query_terms, doc_idx))
+            relevance_list.append(self.get_relevance(query_terms, doc_idx))
         return np.array(relevance_list)
 
     def get_relevance(self, query_terms, doc_idx):
         score = 0
         for query_term in query_terms:
-            score += self.idfs[query_term] * (self.word_bags[doc_idx][query_term] * (self.k + 1)) / (
-                self.word_bags[doc_idx][query_term] + self.k * (1 - self.b + self.b * len(self.word_bags) / self.avgdl))
+            if query_term in self.idfs.keys():
+                idfs_score = self.idfs[query_term]
+            else:
+                idfs_score = math.log((len(self.word_bags)+0.5)/0.5 +1)
+
+            if query_term in self.word_bags[doc_idx].keys():
+                frequency = self.word_bags[doc_idx][query_term]
+            else:
+                frequency = 0
+            score += idfs_score * (frequency*(self.k + 1))/(frequency+self.k*(1-self.b+self.b*self.doc_lengths[doc_idx]/self.avgdl))
         return score

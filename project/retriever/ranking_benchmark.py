@@ -1,24 +1,24 @@
 from datasets import load_dataset
 import numpy as np
-from model import BM25
+from model import BM25, ColSentenceModel
 import os
 import torch
 import json
+import math
+import itertools
 
 
 class ranking_benchmark:
-    def __init__(self, dataset_name, dir_name, prefix="", result_path="datasets/preprocessed/"):
+    def __init__(self, dataset_name, dir_name, prefix="", result_path="datasets/preprocessed/", max_samples=100):
         dataset = load_dataset(dataset_name, dir_name)
+        dataset = dataset["test"][:max_samples]
         self.bm25 = BM25()
-        self.queries = {}
+        self.queries = dict(zip(dataset["query"], dataset["query_id"]))
 
-        for query_idx in range(len(dataset["test"]["queries"])):
-            self.queries[dataset["test"]["queries"][query_idx]] = dataset["test"]["query_id"][query_idx]
+        self.documents, self.relevance_map = self.preprocess(dataset, prefix, result_path)
+        self.bm25.preprocess(self.documents) # computes bow components ahead of time
 
-        self.documents, self.relevance_map = self.preprocess(dataset["test"], prefix, result_path)
-        self.bm25.preprocess(self.documents)  # computes bow components ahead of time
-
-        self.per_query_rankings = {}
+        self.per_query_rankings, self.avg_rel_rank = self.get_per_query_rankings()
 
     def preprocess(self, dataset, prefix="", result_path="datasets/preprocessed/"):
         # assign object var here, so other methods can access it without blowing up the passed parameters. This is not clean. Fix later.
@@ -26,17 +26,10 @@ class ranking_benchmark:
         # assign object var here, so other methods can access it without blowing up the passed parameters. This is not clean. Fix later.
         self.result_path = result_path
         result_dir_contents = os.listdir(result_path)
+        
+        if not any(map(lambda x: f"{self.prefix}passages.json"==x, result_dir_contents)): # passages json is not already present. compute from scratch.
+            passages, relevance_tensor = self.extract_passages_and_relevance(dataset)
 
-        # passages json is not already present. compute from scratch.
-        if not any(map(lambda x: f"{self.prefix}passages.json" == x, result_dir_contents)):
-            passages, relevance_assignments = self.extract_passages_and_relevance(dataset)
-
-            # save relevance assignments
-            passage_map = {}
-            for idx, passage in enumerate(passages):
-                passage_map[passage] = idx
-            relevance_assignments = list(map(lambda x: [x[0], x[1], passage_map[x[2]]], relevance_assignments))
-            relevance_tensor = torch.tensor(relevance_assignments)
             torch.save(relevance_tensor, f"{self.result_path}{self.prefix}relevance_assignments.pt")
 
             # save list of passages (NOTE: we treat passage ids implicitly by referencing the index in this list. DO NOT SHUFFLE.)
@@ -45,24 +38,61 @@ class ranking_benchmark:
         else:
             with open(f"{self.result_path}{self.prefix}passages.json", "r") as f:
                 passages = json.load(f)
+            relevance_tensor = torch.load(f"{self.result_path}{self.prefix}relevance_assignments.pt")
 
-        return passages, relevance_assignments
+        return passages, relevance_tensor
 
-    # slow for loop implementation. But not worth the effort to optimize rn. fix if nessecary
-    def extract_passages_and_relevance(self, dataset):
-        passages = []
-        relevance_assignments = []
-        for idx in range(0, len(dataset["passages"])):
-            relevance_labels = dataset["passages"][idx]["is_selected"]
-            passage_list = dataset["passages"][idx]["passage_text"]
+    def extract_passages_and_relevance(self, dataset): # slow for loop implementation. But not worth the effort to optimize rn. fix if nessecary
+        passages = list(list(itertools.chain.from_iterable([ex["passage_text"] for ex in dataset["passages"]]))) # extracts list of all text at once. Probably very big
+        relevance_assignments = torch.Tensor(list(itertools.chain.from_iterable([ex["is_selected"] for ex in dataset["passages"]])))
+        query_ids = torch.Tensor(list(itertools.chain.from_iterable([[dataset["query_id"][idx]]*len(dataset["passages"][idx]["passage_text"]) for idx in range(len(dataset["query_id"]))])))
 
-            passages.extend(dataset["passages"][idx]["passage_text"])
-            relevance_assignments.extend([[relevance_labels[i], dataset["query_id"][i], passage_list[i]]
-                                         for i in range(0, len(relevance_labels))])
+        passage_ids = torch.range(0, len(passages)-1) # torch range is weird
+        relevance_assignments = torch.stack((query_ids, passage_ids, relevance_assignments), dim=1)
 
-        passages = list(set(passages))
         return passages, relevance_assignments
 
     def get_per_query_rankings(self):
-        for query in self.queries.keys():
-            relevance_assignments = np.vstack((self.bm25.calculate_rels(query), np.arange(len(self.documents))))
+        relevance_rankings = {}
+        relevant_ranks = []
+        for query in self.queries.keys(): # slow
+            relevance_assignments = np.append(np.expand_dims(self.bm25.calculate_rels(query), axis=1), np.expand_dims(np.arange(len(self.documents)), axis=1), axis=1)
+            sorted_relevance_idx = np.argsort(relevance_assignments[:,0])
+            #sorted_relevance_assignments = relevance_assignments[sorted_relevance_idx]
+            relevance_rankings[query] = (relevance_assignments, sorted_relevance_idx)
+            #for relevant, q_idx, doc_idx in self.relevance_map:  # slow
+            #    if relevant == 1 and q_idx == self.queries[query]:
+            #        relevant_ranks.append(np.argwhere(sorted_relevance_assignments[:,1]==doc_idx)[0]) # find first occurence of doc idx of document marked as relevant. Sanity check of BM25 ranking
+
+        avg_rel_rank = 0 # sum(relevant_ranks)/len(relevant_ranks) # NO RELEVANCE LABELS IN THE TEST DATASET ANYWAYS?
+        return relevance_rankings, avg_rel_rank
+    
+    def dcg(self, query, ranking):
+        discount_factors = np.vectorize(lambda x: 1/math.log2(x+1))(np.arange(len(ranking)))
+        return np.sum(self.relevance_map[query][0][ranking]*discount_factors)
+
+    def ndcg(self, query, ranking):
+        rank_dcg = self.dcg(query, ranking)
+        ideal_dcg = self.dcg(query, self.relevance_map[query][1][:len(ranking)])
+        return rank_dcg/ideal_dcg
+    
+    def benchmark(self, model): # Needs some kind of batching. cant hold a significant amount of embeddings in memory.
+        doc_embeddings = model.embed(self.documents) # assumes no shuffelling happens here
+        q_embedding = model.embed(self.queries.keys())
+        ndcg_scores = []
+        for query_idx in range(len(self.queries.keys())):
+            doc_relevancies = model.resolve(q_embedding[query_idx], doc_embeddings)
+            doc_sort_idx = np.argsort(doc_relevancies)
+            local_ndcg = self.ndcg(query=self.queries.keys()[query_idx], ranking=doc_sort_idx)
+            ndcg_scores.append(local_ndcg)
+        avg_ndcg = sum(ndcg_scores)/len(ndcg_scores)
+        return avg_ndcg
+
+
+
+model = ColSentenceModel()
+model_path = "./clip/ColSent/bert-mini/b64_lr1E-06_microsoft/ms_marcov2.1/"
+model_name = "model.safetensors"
+model.load(model_path+model_name)
+benchmark = ranking_benchmark("microsoft/ms_marco", "v2.1", "[rank]", model_path)
+benchmark.benchmark(model)
