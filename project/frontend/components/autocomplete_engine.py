@@ -1,70 +1,59 @@
-
-
 import asyncio
 import json
 import os
 import re
 import time
-from typing import List, Dict, Set, Tuple, Optional, TYPE_CHECKING
+import threading
+import requests
 from collections import defaultdict
 from urllib.parse import urljoin
-import requests
 from difflib import SequenceMatcher
-import threading
 import concurrent.futures
+from typing import List, Dict, Set, Tuple, Optional, TYPE_CHECKING
+import logging
 
-if TYPE_CHECKING:
-    from typing import Self
+from dataclasses import dataclass, field
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
+@dataclass
 class TrieNode:
-    """Trie node for efficient prefix matching"""
-    
+    children: dict = field(default_factory=dict)
+    is_end_word: bool = False
+    priority: int = 0
+    word: str = ""
+
+class TrieTree:
     def __init__(self):
-        self.children = {}
-        self.is_end_word = False
-        self.priority = 0
-        self.word = ""
-    
+        self.root = TrieNode()
+
     def insert(self, word: str, priority: int = 1):
-        """Insert a word into the trie"""
-        node = self
+        node = self.root
         for char in word:
             if char not in node.children:
                 node.children[char] = TrieNode()
             node = node.children[char]
         node.is_end_word = True
-        node.priority = max(node.priority, priority)  # Keep highest priority
+        node.priority = max(node.priority, priority)
         node.word = word
-    
+
     def search_prefix(self, prefix: str, max_results: int = 10) -> List[Tuple[str, int]]:
-        """Search for words with given prefix"""
-        node = self
+        node = self.root
         for char in prefix:
             if char not in node.children:
                 return []
             node = node.children[char]
-        
-        # Collect all words from this node
         results = []
-        self._collect_words(node, results, max_results)
-        
-        # Sort by priority and return
+        self._collect_words(node, results)
         results.sort(key=lambda x: (-x[1], len(x[0])))
         return results[:max_results]
-    
-    def _collect_words(self, node: "TrieNode", results: List[Tuple[str, int]], max_results: int):
-        """Collect all words from a node"""
-        if len(results) >= max_results:
-            return
-        
+
+    def _collect_words(self, node: TrieNode, results: List[Tuple[str, int]]):
         if node.is_end_word:
             results.append((node.word, node.priority))
-        
         for child in node.children.values():
-            if len(results) >= max_results:
-                break
-            self._collect_words(child, results, max_results)
+            self._collect_words(child, results)
 
 
 class AutocompleteEngine:
@@ -85,7 +74,7 @@ class AutocompleteEngine:
         self.word_frequencies = defaultdict(int)
         self.recent_searches = []
         self.popular_queries = set()
-        self.trie = TrieNode()
+        self.trie = TrieTree()
         self.is_loaded = False
         self.loading_lock = threading.Lock()
         
@@ -96,117 +85,24 @@ class AutocompleteEngine:
         
         os.makedirs(cache_dir, exist_ok=True)
         
-        # Dictionary sources
+        # Dictionary sources (only remote/large dictionaries)
         self.dictionary_sources = {
-            'english_words': 'https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt',
-            'tübingen_terms': self._get_tübingen_terms()
+            'english_words': 'https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt'
         }
-        
+        # Load local/special dictionaries directly
+        self.dictionaries['tübingen_terms'] = self._get_tübingen_terms()
+        self.dictionaries['popular_patterns'] = self._get_popular_patterns()
         self._start_background_loading()
 
     def _get_tübingen_terms(self) -> List[str]:
-        """Get Tübingen-specific terms and locations VIA CHATGPT!"""
-        return [
-            # Locations and attractions
-            'tübingen', 'tuebingen', 'tubingen',
-            'hohentübingen castle', 'hohentuebingen castle',
-            'neckar river', 'neckar',
-            'old town', 'altstadt',
-            'market square', 'marktplatz',
-            'stiftskirche', 'collegiate church',
-            'botanical garden', 'botanischer garten',
-            'university of tübingen', 'eberhard karls university',
-            'schloss hohentübingen',
-            'hölderlinturm', 'hoelderlinturm',
-            'stocherkahn', 'punting',
-            'platanenallee',
-            'wilhelmstraße', 'wilhelmstrasse',
-            'ammergasse',
-            'judengasse',
-            'kornhausstraße', 'kornhausstrasse',
-            
-            # Food and dining
-            'swabian cuisine', 'schwäbische küche',
-            'spätzle', 'spaetzle',
-            'maultaschen',
-            'brezn', 'pretzel',
-            'weisswurst', 'weißwurst',
-            'beer garden', 'biergarten',
-            'gasthof', 'gasthaus',
-            'bäckerei', 'baeckerei',
-            'konditorei',
-            'restaurant',
-            'cafe', 'café',
-            'kneipe', 'pub',
-            'wurstbude',
-            
-            # Culture and events
-            'festival', 'fest',
-            'museum', 'museen',
-            'theater',
-            'concert', 'konzert',
-            'art gallery', 'galerie',
-            'cultural event', 'kulturelle veranstaltung',
-            'stadtfest',
-            'weihnachtsmarkt', 'christmas market',
-            'kunsthalle',
-            'city library', 'stadtbibliothek',
-            
-            # Academic and university
-            'university', 'universität',
-            'students', 'studenten',
-            'campus',
-            'faculty', 'fakultät',
-            'library', 'bibliothek',
-            'research', 'forschung',
-            'lecture', 'vorlesung',
-            'seminar',
-            'dissertation',
-            'professor',
-            'institute', 'institut',
-            
-            # Transportation and practical
-            'bus', 'bahn', 'train',
-            'parking', 'parkplatz',
-            'hotel', 'accommodation',
-            'tourist information', 'touristeninformation',
-            'city hall', 'rathaus',
-            'post office', 'post',
-            'bank',
-            'pharmacy', 'apotheke',
-            'hospital', 'krankenhaus',
-            'shopping', 'einkaufen',
-            'supermarket',
-            
-            # Common search patterns
-            'things to do', 'sehenswürdigkeiten',
-            'attractions', 'attraktionen',
-            'sightseeing', 'besichtigung',
-            'tourist guide', 'reiseführer',
-            'opening hours', 'öffnungszeiten',
-            'admission', 'eintritt',
-            'price', 'preis',
-            'map', 'karte',
-            'directions', 'wegbeschreibung',
-            'contact', 'kontakt',
-            'website', 'webseite',
-            'phone', 'telefon',
-            'address', 'adresse',
-            'reviews', 'bewertungen',
-            'photos', 'fotos',
-            'history', 'geschichte',
-            'architecture', 'architektur',
-            'medieval', 'mittelalterlich',
-            'historic', 'historisch',
-            'traditional', 'traditionell',
-            'modern',
-            'beautiful', 'schön',
-            'famous', 'berühmt',
-            'popular', 'beliebt',
-            'best', 'beste',
-            'top',
-            'recommended', 'empfohlen'
-        ]
+        """Load Tübingen-specific terms from a text file."""
+        terms_path = os.path.join(os.path.dirname(__file__), "tuebingen_terms.txt")
+        try:
+            with open(terms_path, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            logging.error(f"Error loading tuebingen_terms.txt: {e}")
+            return []
 
     def _start_background_loading(self):
         """Start loading dictionaries in background thread"""
@@ -217,52 +113,53 @@ class AutocompleteEngine:
                 with self.loading_lock:
                     self.is_loaded = True
             except Exception as e:
-                print(f"Error loading dictionaries: {e}")
-        
+                logging.error(f"Error loading dictionaries: {e}")
         thread = threading.Thread(target=load_async, daemon=True)
         thread.start()
 
     def _load_dictionaries(self):
         """Load dictionaries from various sources"""
-        print("Loading autocomplete dictionaries...")
-        
-        # Load Tübingen-specific terms first (highest priority)
-        self.dictionaries['tübingen_terms'] = self._get_tübingen_terms()
-        
-        # Load popular search patterns
-        self.dictionaries['popular_patterns'] = self._get_popular_patterns()
-        
-        # Try to load online dictionaries
+        logging.info("Loading autocomplete dictionaries...")
+        # Only load remote/large dictionaries
+        self.all_dictionaries_loaded = True
         for name, url in self.dictionary_sources.items():
-            if name == 'tübingen_terms':
-                continue  # Already loaded
-                
             cache_file = os.path.join(self.cache_dir, f"{name}.txt")
-            
+            words = []
             # Check if cached version exists and is recent (1 day)
             if os.path.exists(cache_file) and time.time() - os.path.getmtime(cache_file) < 86400:
                 try:
                     with open(cache_file, 'r', encoding='utf-8') as f:
                         words = [line.strip().lower() for line in f if line.strip()]
-                        self.dictionaries[name] = words[:5000]  # Limit to 5000 words
-                        print(f"Loaded {len(self.dictionaries[name])} words from {name} (cached)")
+                        self.dictionaries[name] = words
+                        logging.info(f"Loaded {len(self.dictionaries[name])} words from {name} (cached)")
                 except Exception as e:
-                    print(f"Error loading cached {name}: {e}")
+                    logging.error(f"Error loading cached {name}: {e}")
+                    self.all_dictionaries_loaded = False
             else:
                 # Download fresh dictionary
                 try:
                     response = requests.get(url, timeout=10)
                     if response.status_code == 200:
                         words = [line.strip().lower() for line in response.text.split('\n') if line.strip()]
-                        self.dictionaries[name] = words[:5000]  # Limit to 5000 words
-                        
+                        self.dictionaries[name] = words
                         # Cache the dictionary
                         with open(cache_file, 'w', encoding='utf-8') as f:
                             f.write('\n'.join(words))
-                        
-                        print(f"Downloaded and cached {len(self.dictionaries[name])} words from {name}")
+                        logging.info(f"Downloaded and cached {len(self.dictionaries[name])} words from {name}")
+                    else:
+                        logging.warning(f"Failed to download {name}, status code: {response.status_code}")
+                        self.all_dictionaries_loaded = False
                 except Exception as e:
-                    print(f"Error downloading {name}: {e}")
+                    logging.error(f"Error downloading {name}: {e}")
+                    self.all_dictionaries_loaded = False
+            # Check if we loaded a suspiciously small number of words
+            if len(words) < 10000:
+                logging.warning(f"Only {len(words)} words loaded for {name}. Dictionary may be incomplete.")
+                self.all_dictionaries_loaded = False
+    @property
+    def dictionaries_fully_loaded(self) -> bool:
+        """Indicates if all dictionaries were fully loaded."""
+        return getattr(self, 'all_dictionaries_loaded', False)
 
     def _get_popular_patterns(self) -> List[str]:
         """Get popular search patterns and combinations"""
@@ -311,16 +208,14 @@ class AutocompleteEngine:
 
     def _build_trie(self):
         """Build trie structure for fast prefix matching"""
-        self.trie = TrieNode()
-        
+        self.trie = TrieTree()
         # Add all dictionary words to trie with priorities
         priority_order = ['tübingen_terms', 'popular_patterns', 'english_words']
-        
         for dict_name in priority_order:
             if dict_name in self.dictionaries:
                 priority = len(priority_order) - priority_order.index(dict_name)
                 for word in self.dictionaries[dict_name]:
-                    if word and len(word) > 2:  # Only add words longer than 2 characters
+                    if word and len(word) > 2:
                         self.trie.insert(word.lower(), priority)
 
     def add_recent_search(self, query: str):
@@ -336,8 +231,8 @@ class AutocompleteEngine:
             self.recent_searches = self.recent_searches[:self.max_recent_searches]
             
             # Also add to trie with high priority
-            if hasattr(self, 'trie'):
-                self.trie.insert(query, 10)  # High priority for recent searches
+        if hasattr(self, 'trie'):
+            self.trie.insert(query, 10)  # High priority for recent searches
 
     def get_suggestions(self, query: str, max_results: int = 8) -> List[Dict]:
         """

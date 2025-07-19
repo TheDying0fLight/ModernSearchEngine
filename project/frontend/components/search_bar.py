@@ -19,14 +19,7 @@ class SearchBar(ft.SearchBar):
             view_hint_text="Search suggestions",
             bar_leading=ft.Icon(ft.Icons.SEARCH, color=ft.Colors.BLUE_600, size=20),
             view_leading=ft.Icon(ft.Icons.SEARCH, color=ft.Colors.BLUE_600, size=20),
-            bar_trailing=[
-                ft.IconButton(
-                    icon=ft.Icons.MIC,
-                    tooltip="Voice search",
-                    icon_color=ft.Colors.BLUE_600,
-                    on_click=self.handle_voice_search
-                )
-            ],
+            bar_trailing=[],
             on_change=self.handle_change,
             on_submit=self.handle_submit,
             on_tap=self.handle_tap,

@@ -2,6 +2,9 @@
 crawled (1).jsonl
 crawled.jsonl
 
+# auto complete cache
+english_words.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
