@@ -9,8 +9,7 @@ import os
 import hashlib
 import time
 
-HTML_FILE = "indexed_html.jsonl"
-DOCS_FILE = "indexed_docs.jsonl"
+from crawler import DOCS_FILE, HTML_FILE
 
 @dataclass
 class Document:

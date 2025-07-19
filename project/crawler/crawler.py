@@ -46,7 +46,8 @@ PARSER = "lxml"
 DEFAULT_DELAY = 1
 TIMEOUT = 10
 STATE_FILE = "crawler_state.json"
-DOC_COLLECTION_FILE = "indexed_docs.jsonl"
+HTML_FILE = "indexed_html.jsonl"
+DOCS_FILE = "indexed_docs.jsonl"
 
 
 class Crawler:
@@ -64,8 +65,10 @@ class Crawler:
         self.user_agents = user_agents
         self.max_workers = max_workers
         self.auto_resume = auto_resume
+
         self.state_path = os.path.join(path, STATE_FILE)
-        self.doc_collection_path = os.path.join(path, DOC_COLLECTION_FILE)
+        self.doc_collection_path = os.path.join(path, DOCS_FILE)
+        self.html_path = os.path.join(path, HTML_FILE)
 
         self.write_lock = threading.Lock()
 
@@ -93,7 +96,11 @@ class Crawler:
         recrawl_interval = 60 * 60 * 24 * 7  # recrawl if site is older than 7 days
         self.recrawl_interval = recrawl_interval  # seconds
 
-        self.shutdown_requested = False  # flag to signal shutdown
+        if not auto_resume:
+            for file in [self.state_path, self.doc_collection_path, self.html_path]:
+                if os.path.exists(file):
+                    os.remove(file)
+                    logging.info(f"Removed existing file: {file}")
 
     def get_domain(self, parse: ParseResult):
         return ".".join(parse.hostname.split(".")[-2:]) if parse.hostname else ""
