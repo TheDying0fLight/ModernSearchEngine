@@ -8,7 +8,8 @@ import nltk
 import math
 import numpy as np
 import re
-from embedding import Embedding
+
+from .embedding import Embedding
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 

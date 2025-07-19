@@ -24,7 +24,7 @@ import traceback
 from .utils import predict_language_from_url
 from .utils import TrackingThreadPoolExecutor, TimeoutRobotFileParser
 from .proxy_manager import ProxyManager
-from .document import Document, DocumentCollection
+from .document import Document, DocumentCollection, HTML_FILE, DOCS_FILE
 
 
 logging.basicConfig(
@@ -46,9 +46,6 @@ PARSER = "lxml"
 DEFAULT_DELAY = 1
 TIMEOUT = 10
 STATE_FILE = "crawler_state.json"
-HTML_FILE = "indexed_html.jsonl"
-DOCS_FILE = "indexed_docs.jsonl"
-
 
 class Crawler:
     def __init__(self,
@@ -384,7 +381,7 @@ class Crawler:
                 logging.warning(f"Failed to load previous state: {e}. Starting fresh crawl.")
 
             try:
-                self.doc_collection.load_collection_from_file(self.doc_collection_path)
+                self.doc_collection.load_from_file(self.doc_collection_path)
                 self.add_stale_docs_to_frontier()
             except Exception as e:
                 logging.warning(f"Failed to load document collection: {e}. Starting fresh crawl.")

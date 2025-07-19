@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+from pathlib import Path
+from collections import defaultdict
 import logging
 import json
 import re
@@ -9,7 +11,8 @@ import os
 import hashlib
 import time
 
-from crawler import DOCS_FILE, HTML_FILE
+HTML_FILE = "indexed_html.jsonl"
+DOCS_FILE = "indexed_docs.jsonl"
 
 @dataclass
 class Document:
@@ -144,8 +147,7 @@ class DocumentCollection:
     def __init__(self):
         self.documents: Dict[str, Document] = {}
         self.content_hashes: Dict[str, str] = {}
-        self.domain_documents: Dict[str, List[str]] = {}
-        self.parent_urls: Dict[str, str] = {}
+        self.domain_documents: Dict[str, List[str]] = defaultdict(list)
 
     def add_document(self, doc: Document) -> bool:
         # check if document content already in collection
@@ -160,8 +162,6 @@ class DocumentCollection:
         self.content_hashes[doc.content_hash] = doc.url
 
         # update domain documents
-        if doc.domain not in self.domain_documents:
-            self.domain_documents[doc.domain] = []
         if doc.url not in self.domain_documents[doc.domain]:
             self.domain_documents[doc.domain].append(doc.url)
 
@@ -185,41 +185,44 @@ class DocumentCollection:
         html_path = os.path.join(path, HTML_FILE)
         with open(html_path, 'w', encoding='utf-8') as f:
             for _, doc in self.documents.items():
-                f.write(json.dumps({"html": doc.html}) + "\n")
+                f.write(json.dumps({"url": doc.url, "html": doc.html}) + "\n")
         logging.info(f"Saved {len(self.documents)} documents to {html_path}")
 
-    def load_collection_from_file(self, file_path: str):
-        """ Load the document collection from a file in JSONL format, one document per line."""
-        try:
-            logging.info(f"Loading document collection from {file_path}")
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        doc_dict = json.loads(line)
-                        doc = Document(url="")
-                        doc.load_from_dict(doc_dict)
-                        self.documents[doc.url] = doc
-            logging.info(f"Loaded {len(self.documents)} documents from {file_path}")
-        except Exception as e:
-            logging.error(f"Failed to load document collection from {file_path}: {e}")
+    def load_from_file(self, dir_path: str, load_html: bool = False):
+        base = Path(dir_path)
+        for fn, handler in [
+            (DOCS_FILE, self._add_doc),
+            (HTML_FILE, self._add_html) if load_html else None
+        ]:
+            if fn is None: continue
+            try:
+                lines = 0
+                for line in (base / fn).read_text(encoding="utf-8").splitlines():
+                    if not (line := line.strip()): continue
+                    data = json.loads(line)
+                    handler(data)
+                    lines += 1
+                logging.info(f"Processed {fn}, Loaded {lines} lines of data, {len(self.documents)} documents.")
+            except FileNotFoundError:
+                logging.error(f"Missing file: {fn}")
+            except Exception as e:
+                logging.error(f"Error in {fn}: {e}")
 
-    def load_htmls_from_file(self, file_path: str):
-        """ Load HTML content from a file in JSONL format, one document per line."""
-        try:
-            logging.info(f"Loading HTML content from {file_path}")
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        html_dict = json.loads(line)
-                        url = html_dict.get("url", "")
-                        html = html_dict.get("html", "")
-                        if url in self.documents:
-                            self.documents[url].html = html
-            logging.info(f"Loaded HTML content for {len(self.documents)} documents from {file_path}")
-        except Exception as e:
-            logging.error(f"Failed to load HTML content from {file_path}: {e}")
+    def _add_doc(self, d):
+        doc = Document(url="")
+        doc.load_from_dict(d)
+        if doc.url:
+            print(doc.url)
+            self.documents[doc.url] = doc
+        else:
+            logging.warning("Skipped doc without URL: %r", d)
+
+    def _add_html(self, h):
+        url, html = h.get("url"), h.get("html")
+        print(url)
+        if url in self.documents and html:
+            print(len(html))
+            self.documents[url].html = html
 
     def get_document(self, url: str) -> Optional[Document]:
         return self.documents.get(url)
