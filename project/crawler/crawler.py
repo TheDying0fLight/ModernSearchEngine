@@ -51,7 +51,7 @@ class Crawler:
     def __init__(self,
                  seed: list[str],
                  max_workers: int = multiprocessing.cpu_count() // 2,
-                 keywords: list = [r't\S{1,6}binge', 'eberhard karl', 'palmer',
+                 keywords: list = [r't\S{1,6}bingen', 'eberhard karl', 'palmer',
                                    'lustnau', r's\S{1,6}dstadt', 'neckar island', 'bebenhausen'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = False,
@@ -64,7 +64,7 @@ class Crawler:
         self.auto_resume = auto_resume
 
         self.path = path
-        self.backup_path = f"{path}_backup"
+        self.backup_path = f"{path}/backup"
         self.state_path = os.path.join(path, STATE_FILE)
         self.doc_collection_path = os.path.join(path, DOCS_FILE)
         self.html_path = os.path.join(path, HTML_FILE)
@@ -85,6 +85,7 @@ class Crawler:
 
         self.domain_lock = threading.Lock()
         self.domain_dict = defaultdict(lambda: defaultdict(int))
+        self.domain_locks = defaultdict(threading.Lock)
 
         # initialize document collection
         self.doc_lock = threading.Lock()
@@ -324,8 +325,11 @@ class Crawler:
             logging.debug("Language detection failed, assuming English")
             return True
 
-    def crawl(self, entry):
-        """Crawl a single URL, extract links, and add them to the frontier."""
+    def crawl(self, entry, lock: threading.Lock):
+        try: self._crawl(entry)
+        finally: lock.release()
+
+    def _crawl(self, entry):
         _, url, parent_url, recrawl = entry
         keywords_found = False
         english = False
@@ -378,9 +382,6 @@ class Crawler:
                 logging.debug(
                     f"Visited {len(self.visited_pages)} pages (english={english}, relevance={relevance}, URL: {url})")
 
-            domain = self.get_domain(urlparse(url))
-            with self.domain_lock: self.domain_dict[domain]['in_use'] = False
-
     def run(self, amount: Optional[int] = None):
         if self.auto_resume and self._can_resume():
             logging.info(f"Auto-resuming from previous state: {self.state_path}")
@@ -402,38 +403,44 @@ class Crawler:
 
         with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
-            while True:
-                prior_time = time.time()
-                with self.visited_lock: amt_visited = len(self.visited_pages)
-                if not amount or amt_visited <= amount:
-                    futures.update(self.schedule_urls(executor))
-                if not futures: break
+            try:
+                while True:
+                    prior_time = time.time()
+                    with self.visited_lock: amt_visited = len(self.visited_pages)
+                    if not amount or amt_visited <= amount:
+                        futures.update(self.schedule_urls(executor))
+                    if not futures: break
 
-                post_time = time.time()
-                diff = post_time - prior_time
-                if diff < 2: time.sleep(2 - diff)
-                visiting = list(map(lambda x: x[2], futures))
-                with self.visited_lock: amt_visited     = len(self.visited_pages)
-                with self.domain_lock:  len_domain_dict = len(self.domain_dict)
-                logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, Domain dict size: {len_domain_dict}, '
-                                     f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
-                futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
-        self.cleanup_and_shutdown()
+                    post_time = time.time()
+                    diff = post_time - prior_time
+                    if diff < 2: time.sleep(2 - diff)
+                    visiting = list(map(lambda x: x[2], futures))
+                    with self.visited_lock: amt_visited     = len(self.visited_pages)
+                    with self.domain_lock:  len_domain_dict = len(self.domain_dict)
+                    logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, Domain dict size: {len_domain_dict}, '
+                                        f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
+                    filtered = set(filter(lambda f: f[0].done(), futures))
+                    futures.difference_update(filtered)
+            finally:
+                self.cleanup_and_shutdown()
 
     def schedule_urls(self, executor: TrackingThreadPoolExecutor):
         futures = set()
+        to_remove = set()
         with self.frontier_lock: frontier = self.frontier.copy()
         for entry in frontier:
-            if len(futures) > self.max_workers * 2: break
+            if not len(futures) < self.max_workers: break
             domain = self.get_domain(urlparse(entry[1]))
             with self.domain_lock:
-                if self.domain_dict[domain].get('in_use'): continue
-                self.domain_dict[domain]['in_use'] = True
+                lock = self.domain_locks[domain]
+                if lock.locked(): continue
+                else: lock.acquire()
 
-            with self.frontier_lock:
-                self.frontier.remove(entry)
-                heapq.heapify(self.frontier)
-            futures.add((executor.submit(self.crawl, entry), time.time(), entry[1]))
+            to_remove.add(entry)
+            futures.add((executor.submit(self.crawl, entry, lock), time.time(), entry[1]))
+        with self.frontier_lock:
+            self.frontier = [entry for entry in self.frontier if entry not in to_remove]
+            heapq.heapify(self.frontier)
         return futures
 
     def _can_resume(self) -> bool:
