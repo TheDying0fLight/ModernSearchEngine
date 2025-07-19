@@ -28,6 +28,7 @@ exceptiongroup
 executing
 fake-useragent
 filelock
+flet
 frozenlist
 fsspec
 gitdb

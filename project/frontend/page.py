@@ -1,6 +1,7 @@
 import flet as ft
 import time
 import logging
+import urllib.parse
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
@@ -52,9 +53,12 @@ class SearchEnginePage:
         self.page.add(self.tabs)
 
     def route_change(self, route):
+        
         template_route = ft.TemplateRoute(self.page.route)
         if template_route.match('/search?:q'):
-            query = template_route.q.split('=')[1]
+            # decode percent-encoding and plus as space
+            query_param = template_route.q.split('=')[1]
+            query = urllib.parse.unquote_plus(query_param)
             if not query.strip():
                 self.page.go('/')
                 return
@@ -63,6 +67,7 @@ class SearchEnginePage:
             self.search(query)
         else:
             self.page.go('/')
+
     def navigate_to_search_tab(self):
         """Navigate to the search tab"""
         self.tabs.selected_index = 0
