@@ -4,7 +4,7 @@
 Start web app with (arguments are optional):
 
 ```
-python -m project --host localhost --port 8080
+python -m project --host 127.0.0.1 --port 8080
 ```
 
 ## Organisatorisches
