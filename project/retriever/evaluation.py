@@ -1,8 +1,8 @@
 import numpy as np
-from sklearn.metrics import confusion_matrix
 import math
 
-def compute_metrics(eval_pred):
+
+def compute_metrics(eval_pred: tuple):
     logits, _ = eval_pred
     # Convert logits to similarity scores in [0,1]
     conf: np.ndarray = (logits + 1) / 2
@@ -26,7 +26,7 @@ def compute_metrics(eval_pred):
     metrics['min_rank_norm'] = ranks_pos.max() / M
 
     for p in [1, 2, 5, 10, 25, 50]:
-        metrics[f"recall@{p}%"] = np.mean(ranks_pos < max(min(N,M) * p / 100, 1))
+        metrics[f"recall@{p}%"] = np.mean(ranks_pos < max(min(N, M) * p / 100, 1))
 
     # Flatten positive (diagonal) and negative (off-diagonal) scores
     mask = np.tile(np.eye(M, dtype=bool), math.ceil(N / M)).T[:N]
@@ -54,8 +54,4 @@ def compute_metrics(eval_pred):
     metrics['best_threshold'] = best_thresh
     metrics['best_score'] = best_score
 
-    # Confusion at best threshold
-    y_pred_best = (y_scores >= best_thresh).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred_best).ravel()
-    metrics.update({'tp': int(tp), 'tn': int(tn), 'fp': int(fp), 'fn': int(fn)})
     return metrics

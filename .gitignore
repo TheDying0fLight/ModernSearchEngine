@@ -1,3 +1,7 @@
+# crawled
+crawled (1).jsonl
+crawled.jsonl
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -174,3 +178,6 @@ cython_debug/
 .pypirc
 /project/retriever/models
 /project/retriever/wandb
+/data
+# datasets folder
+./datasets/

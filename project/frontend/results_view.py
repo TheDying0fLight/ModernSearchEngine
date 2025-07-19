@@ -1,12 +1,22 @@
+from dataclasses import dataclass
 import flet as ft
-from .components import ResultContainer, EmptyState
+from .components import ResultContainer, EmptyState, ResultTitle
 from .tab import TabTitle
+
+@dataclass
+class Result:
+    url: str
+    title: str
+    snippet: str
+    source: str
+    date: str
+    pages: str
 
 
 class ResultCard(ResultContainer):
     """Individual result card component"""
 
-    def __init__(self, result_data, on_click_callback=None, on_favorite_callback=None):
+    def __init__(self, result_data: Result, on_click_callback=None, on_favorite_callback=None):
         self.result_data = result_data
         self.on_click_callback = on_click_callback
         self.on_favorite_callback = on_favorite_callback
@@ -18,12 +28,14 @@ class ResultCard(ResultContainer):
             on_click=self.toggle_favorite
         )
         super().__init__(
-            title=self.result_data.get("title", "No Title"),
-            text=self.result_data.get("snippet", "No description available."),
-            source=self.result_data.get("source", "Unknown"),
-            metadata=[self.result_data.get("date", "Unknown"), f"{self.result_data.get('pages', 'N/A')} pages"],
+            title=self.result_data.title,
+            text=self.result_data.snippet,
+            source=self.result_data.source,
+            metadata=[self.result_data.date, f"{self.result_data.pages} pages"],
             button=self.favorite_button,
-            on_click=lambda e, result_data=result_data: on_click_callback(result_data)
+            on_click=lambda e, result_data=result_data: on_click_callback(result_data),
+            width=300,
+            max_hight=300,
         )
 
     def toggle_favorite(self, e):
@@ -51,7 +63,7 @@ class ResultsView(ft.Container):
             visible=False
         )
 
-    def show_results(self, query, results):
+    def show_results(self, query, results: list[list[Result]]):
         if (not results) or len(results) == 0:
             self.content = results_component = EmptyState(
                 icon=ft.Icons.SEARCH_OFF,
@@ -62,15 +74,26 @@ class ResultsView(ft.Container):
                 on_button_click= lambda e: None,
             )
         else:
-            title = TabTitle(f"Search results for '{query}' ({len(results)} result{'s' if len(results) != 1 else ''})")
-            results_component = ft.Column([
-                ResultCard(
-                    result_data=result,
-                    on_click_callback=self.on_result_click,
-                    on_favorite_callback=self.on_favorite_toggle
-                ) for result in results],
-                scroll=ft.ScrollMode.AUTO,
-                spacing=0)
+            num_results = sum([len(res) for res in results])
+            title = TabTitle(f"Search results for '{query}' ({num_results} result{'s' if num_results != 1 else ''})")
+            result_column = []
+            for result_row in results:
+                result_column.append(ft.Container(
+                    ft.Column([
+                        ResultTitle(f"Results similar to '{result_row[0].title}'"),
+                        ft.Row([
+                            ResultCard(
+                                result_data=result,
+                                on_click_callback=self.on_result_click,
+                                on_favorite_callback=self.on_favorite_toggle
+                            ) for result in result_row],
+                            scroll=ft.ScrollMode.ALWAYS,
+                            spacing=10,
+                            expand=True)
+                        ], spacing=10),
+                    padding=20)
+                )
+            results_component = ft.Column(result_column, scroll=ft.ScrollMode.ALWAYS, spacing=20)
             self.content = ft.Column([title, results_component])
         self.visible = True
         self.update()
