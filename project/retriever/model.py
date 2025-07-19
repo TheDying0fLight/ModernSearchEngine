@@ -102,12 +102,21 @@ class ColSentenceModel(nn.Module):
     def resolve(self, query_embeddings, document_embeddings):
         return self.max_sim(document_embeddings, query_embeddings, sentence_wise=False)
 
-    def embed(self, text, query=True):  # sentences structure: (batch x sentences) embeddings
+    def embed(self, text, query=True, batch_size=100):  # sentences structure: (batch x sentences) embeddings
         sentences, idx_map = self.extract_sentences(text)
-        tokens = self.tokenizer(sentences, return_tensors="pt", padding=True,
-                                truncation=True, max_length=512).to(device)
-        embeddings = self.bert_model(**tokens).pooler_output
-        final_embeddings = torch.nn.functional.normalize(self.token_mapper(embeddings), dim=1)
+        max_idx = 0
+        embedding_tensors = []
+        while max_idx < len(sentences):
+            min_idx = max_idx
+            max_idx = min(max_idx+batch_size,len(sentences))
+            batch_sentences = sentences[min_idx:max_idx]
+            tokens = self.tokenizer(batch_sentences, return_tensors="pt", padding=True,
+                                    truncation=True, max_length=512).to(device)
+            embeddings = self.bert_model(**tokens).pooler_output
+            final_embeddings = torch.nn.functional.normalize(self.token_mapper(embeddings), dim=1)
+            embedding_tensors.append(final_embeddings)
+            torch.cuda.empty_cache() # embedding tensors are not freed up, but the model itself may be able to free up some space
+        final_embeddings = torch.cat(embedding_tensors, dim=0)
         if query:
             return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True).transpose(1, 2)
         else:
