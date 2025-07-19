@@ -1,17 +1,21 @@
-import time
 from dataclasses import dataclass, field
-import hashlib
 from typing import List, Dict, Optional, Any
 from urllib.parse import urlparse
+from bs4 import BeautifulSoup
 import logging
 import json
-from bs4 import BeautifulSoup
 import re
+import os
+import hashlib
+import time
 
+HTML_FILE = "indexed_html.jsonl"
+DOCS_FILE = "indexed_docs.jsonl"
 
 @dataclass
 class Document:
-    DEFAULT_KEYWORDS = (r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau', r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen')
+    DEFAULT_KEYWORDS = (r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau',
+                        r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen')
 
     url: str
     title: str = ""
@@ -40,8 +44,6 @@ class Document:
 
     last_crawl_timestamp: float = field(default_factory=time.time)
 
-
-
     def __post_init__(self):
         parsed_url = urlparse(self.url)
         url_parts = self.get_url_parts()
@@ -57,7 +59,6 @@ class Document:
         if self.content_hash == "":
             self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
 
-
     def get_content(self) -> str:
         """ Returns the content of the document, extracting text from HTML."""
         if not self.html:
@@ -65,14 +66,12 @@ class Document:
         soup = BeautifulSoup(self.html, 'html.parser')
         return soup.get_text(separator=' ', strip=True)
 
-
     def _update_html(self, html: str):
         """ Set new HTML content and update metrics."""
         self.html = html
         if html:
             self.update_metrics()
             self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
-
 
     def update_metrics(self):
         soup = BeautifulSoup(self.html, 'html.parser')
@@ -91,38 +90,34 @@ class Document:
         else:
             self.relevance_score += keyword_count
 
-
     def is_duplicate(self, other: 'Document') -> bool:
         if not self.content_hash or not other.content_hash:
             return False
         return self.content_hash == other.content_hash
-    
 
     def get_url_parts(self) -> Dict[str, Any]:
         parsed_url = urlparse(self.url)
         return {
-            "domain" : parsed_url.hostname or "",
+            "domain": parsed_url.hostname or "",
             "subdomain": parsed_url.hostname.split('.')[0] if parsed_url.hostname else "",
         }
 
-
-    def append_to_file(self, info_path: str = "data/indexed_docs.jsonl", html_path: str = "data/indexed_html.jsonl"):
+    def append_to_file(self, path: str = "data"):
         """ Append this document to a JSONL file."""
+        info_path = os.path.join(path, DOCS_FILE)
         with open(info_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(self.info_to_dict()) + "\n")
-        # logging.info(f"Document {self.url} appended to {info_path}")
+        html_path = os.path.join(path, HTML_FILE)
         with open(html_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps({"html": self.html}) + "\n")
-
 
     def load_from_dict(self, data: Dict):
         for key, value in data.items():
             if hasattr(self, key):
                 setattr(self, key, value)
-        
+
         # # Recalculate derived fields
         # self.__post_init__()
-    
 
     def info_to_dict(self) -> Dict:
         return {
@@ -146,14 +141,12 @@ class Document:
         }
 
 
-
 class DocumentCollection:
     def __init__(self):
         self.documents: Dict[str, Document] = {}
         self.content_hashes: Dict[str, str] = {}
         self.domain_documents: Dict[str, List[str]] = {}
         self.parent_urls: Dict[str, str] = {}
-
 
     def add_document(self, doc: Document) -> bool:
         # check if document content already in collection
@@ -174,28 +167,27 @@ class DocumentCollection:
             self.domain_documents[doc.domain].append(doc.url)
 
         return True
-    
 
-    def add_document_and_save(self, doc: Document, file_path: str) -> bool:
+    def add_document_and_save(self, doc: Document, path: str = "data") -> bool:
         """ Add document to collection with duplicate checking, then append to file if successful."""
         if self.add_document(doc):
-            doc.append_to_file(file_path)
+            doc.append_to_file(path)
             return True
         return False
 
-
-    def write_collection_to_file(self, info_path: str = "data/indexed_docs.jsonl", html_path: str = "data/indexed_html.jsonl"):
+    def write_collection_to_file(self, path: str = "data"):
         """ Save the document collection to two files in JSONL format, one document per line."""
+        info_path = os.path.join(path, DOCS_FILE)
         with open(info_path, 'w', encoding='utf-8') as f:
             for _, doc in self.documents.items():
                 f.write(json.dumps(doc.info_to_dict()) + "\n")
         logging.info(f"Saved {len(self.documents)} documents to {info_path}")
 
+        html_path = os.path.join(path, HTML_FILE)
         with open(html_path, 'w', encoding='utf-8') as f:
             for _, doc in self.documents.items():
                 f.write(json.dumps({"html": doc.html}) + "\n")
         logging.info(f"Saved {len(self.documents)} documents to {html_path}")
-
 
     def load_collection_from_file(self, file_path: str):
         """ Load the document collection from a file in JSONL format, one document per line."""
@@ -212,7 +204,6 @@ class DocumentCollection:
             logging.info(f"Loaded {len(self.documents)} documents from {file_path}")
         except Exception as e:
             logging.error(f"Failed to load document collection from {file_path}: {e}")
-
 
     def load_htmls_from_file(self, file_path: str):
         """ Load HTML content from a file in JSONL format, one document per line."""
@@ -231,10 +222,8 @@ class DocumentCollection:
         except Exception as e:
             logging.error(f"Failed to load HTML content from {file_path}: {e}")
 
-
     def get_document(self, url: str) -> Optional[Document]:
         return self.documents.get(url)
-
 
     def remove_document(self, url: str):
         if url in self.documents:
@@ -242,9 +231,9 @@ class DocumentCollection:
 
     def get_all_documents_list(self) -> List[Document]:
         return list(self.documents.values())
-    
+
     def get_documents_by_domain(self, domain: str) -> List[Document]:
-        if domain not in self.domain_documents: 
+        if domain not in self.domain_documents:
             return []
         urls = self.domain_documents.get(domain, [])
         return [self.documents[url] for url in urls if url in self.documents]

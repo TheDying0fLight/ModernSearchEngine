@@ -45,6 +45,8 @@ default_user_agents = [
 PARSER = "lxml"
 DEFAULT_DELAY = 1
 TIMEOUT = 10
+STATE_FILE = "crawler_state.json"
+DOC_COLLECTION_FILE = "indexed_docs.jsonl"
 
 
 class Crawler:
@@ -56,15 +58,14 @@ class Crawler:
                  user_agents: list = default_user_agents,
                  use_proxies: bool = False,
                  auto_resume: bool = False,
-                 state_file: str = "data/crawler_state.json",
-                 doc_collection_file: str = "data/indexed_docs.jsonl"):
+                 path: str = "data"):
         self.use_proxies = use_proxies
         self.keywords = [re.compile(kw) for kw in keywords]
         self.user_agents = user_agents
         self.max_workers = max_workers
         self.auto_resume = auto_resume
-        self.state_file = (state_file)
-        self.doc_collection_file = (doc_collection_file)
+        self.state_path = os.path.join(path, STATE_FILE)
+        self.doc_collection_path = os.path.join(path, DOC_COLLECTION_FILE)
 
         self.write_lock = threading.Lock()
 
@@ -113,23 +114,23 @@ class Crawler:
                     self._write_pending_data()
                     should_save_state = True
 
-        if should_save_state: self.save_current_state(self.state_file)
+        if should_save_state: self.save_current_state(self.state_path)
 
     def _write_pending_data(self):
         """Write pending data to file. Must be called with write_lock held."""
-        if not self.pending_docs or not self.doc_collection_file:
+        if not self.pending_docs or not self.doc_collection_path:
             return
 
         try:
             # append all pending docs to file
             for doc in self.pending_docs:
-                self.doc_collection.add_document_and_save(doc, self.doc_collection_file)
+                self.doc_collection.add_document_and_save(doc, self.doc_collection_path)
                 full_doc = self.doc_collection.get_document(doc.url)
                 if full_doc:
                     full_doc.html = ""  # clear HTML to save memory
                     self.doc_collection.documents[doc.url] = full_doc
 
-            logging.info(f"Appended {len(self.pending_docs)} documents to {self.doc_collection_file}")
+            logging.info(f"Appended {len(self.pending_docs)} documents to {self.doc_collection_path}")
             self.pending_docs.clear()
 
             # overwrite crawler state file with current state
@@ -145,9 +146,9 @@ class Crawler:
                 self._write_pending_data()
 
             # save entire collection as backup
-            if self.doc_collection_file and self.doc_collection.documents and backup:
-                backup_file = self.doc_collection_file.replace('.jsonl', '_complete.jsonl')
-                html_path = self.doc_collection_file.replace('docs', 'html_complete')
+            if self.doc_collection_path and self.doc_collection.documents and backup:
+                backup_file = self.doc_collection_path.replace('.jsonl', '_complete.jsonl')
+                html_path = self.doc_collection_path.replace('docs', 'html_complete')
                 self.doc_collection.write_collection_to_file(info_path=backup_file, html_path=html_path)
                 logging.info(f"Saved backup collection to {backup_file}")
 
@@ -369,14 +370,14 @@ class Crawler:
 
     def run(self, amount: Optional[int] = None):
         if self.auto_resume and self._can_resume():
-            logging.info(f"Auto-resuming from previous state: {self.state_file}")
+            logging.info(f"Auto-resuming from previous state: {self.state_path}")
             try:
-                self.load_state(self.state_file)
+                self.load_state(self.state_path)
             except Exception as e:
                 logging.warning(f"Failed to load previous state: {e}. Starting fresh crawl.")
 
             try:
-                self.doc_collection.load_collection_from_file(self.doc_collection_file)
+                self.doc_collection.load_collection_from_file(self.doc_collection_path)
                 self.add_stale_docs_to_frontier()
             except Exception as e:
                 logging.warning(f"Failed to load document collection: {e}. Starting fresh crawl.")
@@ -428,14 +429,14 @@ class Crawler:
         is recent enough to resume.
         Returns True if can resume, False otherwise.
         """
-        if not os.path.exists(self.state_file):
-            logging.info(f"State file {self.state_file} not found. Cannot resume.")
+        if not os.path.exists(self.state_path):
+            logging.info(f"State file {self.state_path} not found. Cannot resume.")
             return False
-        if not os.path.exists(self.doc_collection_file):
-            logging.info(f"Document collection file {self.doc_collection_file} not found. Cannot resume.")
+        if not os.path.exists(self.doc_collection_path):
+            logging.info(f"Document collection file {self.doc_collection_path} not found. Cannot resume.")
             return False
 
-        stat = os.stat(self.state_file)
+        stat = os.stat(self.state_path)
         age_hours = (time.time() - stat.st_mtime) / 3600
         logging.info(f"Found recent crawler state ({age_hours:.1f} hours old)")
         return True
@@ -447,7 +448,7 @@ class Crawler:
         with self.frontier_lock: stats['frontier'] = len(self.frontier)
         return stats
 
-    def save_current_state(self, file_path: str = "crawler_state.json"):
+    def save_current_state(self, file_name: str = "crawler_state.json"):
         """Save the current frontier and visited pages to a file."""
         with self.visited_lock, self.frontier_lock:
             state = {
@@ -455,8 +456,8 @@ class Crawler:
                 "frontier": list(self.frontier),
             }
         with self.write_lock:
-            with open(file_path, 'w') as f: json.dump(state, f)
-            logging.debug(f"Saved current state to {file_path}")
+            with open(self.state_path, 'w') as f: json.dump(state, f)
+        logging.debug(f"Saved current state to {self.state_path}")
 
     def load_state(self, state_file: str):
         """Load the frontier and visited pages from a file."""
@@ -497,7 +498,7 @@ class Crawler:
         logging.info("Crawler is shutting down, performing cleanup...")
         self.finalize_crawl(backup=True)
         if self.auto_resume:
-            self.save_current_state(self.state_file)
+            self.save_current_state(self.state_path)
 
         stats = self.get_crawling_stats()
         logging.info(f"Final stats: {stats}")
