@@ -17,14 +17,13 @@ import requests
 import time
 import threading
 import multiprocessing
-import heapq
 import sys
 import traceback
 
 from .utils import predict_language_from_url
 from .utils import TrackingThreadPoolExecutor, TimeoutRobotFileParser
 from .proxy_manager import ProxyManager
-from .document import Document, DocumentCollection
+from .document import Document, DocumentCollection, HTML_FILE, DOCS_FILE
 
 
 logging.basicConfig(
@@ -44,27 +43,29 @@ default_user_agents = [
 
 PARSER = "lxml"
 DEFAULT_DELAY = 1
-TIMEOUT = 10
-
+TIMEOUT = 5
+STATE_FILE = "crawler_state.json"
 
 class Crawler:
     def __init__(self,
                  seed: list[str],
                  max_workers: int = multiprocessing.cpu_count() // 2,
-                 keywords: list = [r't\S{1,6}binge', 'eberhard karl', 'palmer',
-                                   'lustnau', r's\S{1,6}dstadt', 'neckar island', 'bebenhausen'],
+                 keywords: list = [r't\S{1,6}bingen', 'neckar island'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = False,
                  auto_resume: bool = False,
-                 state_file: str = "data/crawler_state.json",
-                 doc_collection_file: str = "data/indexed_docs.jsonl"):
+                 path: str = "data"):
         self.use_proxies = use_proxies
         self.keywords = [re.compile(kw) for kw in keywords]
         self.user_agents = user_agents
         self.max_workers = max_workers
         self.auto_resume = auto_resume
-        self.state_file = (state_file)
-        self.doc_collection_file = (doc_collection_file)
+
+        self.path = path
+        self.backup_path = f"{path}/backup"
+        self.state_path = os.path.join(path, STATE_FILE)
+        self.doc_collection_path = os.path.join(path, DOCS_FILE)
+        self.html_path = os.path.join(path, HTML_FILE)
 
         self.write_lock = threading.Lock()
 
@@ -75,13 +76,13 @@ class Crawler:
         # initialize as (priority, url, parent_url, recrawl) tuples - parent_url is None for seed URLs
         initial_urls = [(0.0, url, None, False) for url in (seed or [])]
         self.frontier = initial_urls
-        heapq.heapify(self.frontier)
 
         self.visited_lock = threading.Lock()
         self.visited_pages = {}
 
         self.domain_lock = threading.Lock()
         self.domain_dict = defaultdict(lambda: defaultdict(int))
+        self.domain_locks = defaultdict(threading.Lock)
 
         # initialize document collection
         self.doc_lock = threading.Lock()
@@ -92,7 +93,20 @@ class Crawler:
         recrawl_interval = 60 * 60 * 24 * 7  # recrawl if site is older than 7 days
         self.recrawl_interval = recrawl_interval  # seconds
 
-        self.shutdown_requested = False  # flag to signal shutdown
+        for file in [self.state_path, self.doc_collection_path, self.html_path]:
+            backup_file = file.replace(self.path, self.backup_path)
+            if os.path.exists(file):
+                if not auto_resume:
+                    os.remove(file)
+                    logging.info(f"Removed existing file: {file}")
+            if os.path.exists(backup_file):
+                if not auto_resume:
+                    os.remove(backup_file)
+                    logging.info(f"Removed existing backup file: {backup_file}")
+            else:
+                os.makedirs(os.path.dirname(file), exist_ok=True)
+                # also create backup folder structure
+                os.makedirs(os.path.dirname(backup_file), exist_ok=True)
 
     def get_domain(self, parse: ParseResult):
         return ".".join(parse.hostname.split(".")[-2:]) if parse.hostname else ""
@@ -113,23 +127,23 @@ class Crawler:
                     self._write_pending_data()
                     should_save_state = True
 
-        if should_save_state: self.save_current_state(self.state_file)
+        if should_save_state: self.save_current_state()
 
     def _write_pending_data(self):
         """Write pending data to file. Must be called with write_lock held."""
-        if not self.pending_docs or not self.doc_collection_file:
+        if not self.pending_docs or not self.doc_collection_path:
             return
 
         try:
             # append all pending docs to file
             for doc in self.pending_docs:
-                self.doc_collection.add_document_and_save(doc, self.doc_collection_file)
+                self.doc_collection.add_document_and_save(doc, self.path)
                 full_doc = self.doc_collection.get_document(doc.url)
                 if full_doc:
                     full_doc.html = ""  # clear HTML to save memory
                     self.doc_collection.documents[doc.url] = full_doc
 
-            logging.info(f"Appended {len(self.pending_docs)} documents to {self.doc_collection_file}")
+            logging.info(f"Appended {len(self.pending_docs)} documents to {self.doc_collection_path}")
             self.pending_docs.clear()
 
             # overwrite crawler state file with current state
@@ -145,11 +159,9 @@ class Crawler:
                 self._write_pending_data()
 
             # save entire collection as backup
-            if self.doc_collection_file and self.doc_collection.documents and backup:
-                backup_file = self.doc_collection_file.replace('.jsonl', '_complete.jsonl')
-                html_path = self.doc_collection_file.replace('docs', 'html_complete')
-                self.doc_collection.write_collection_to_file(info_path=backup_file, html_path=html_path)
-                logging.info(f"Saved backup collection to {backup_file}")
+            if self.doc_collection_path and self.doc_collection.documents and backup:
+                self.doc_collection.write_collection_to_file(self.backup_path)
+                logging.info(f"Saved backup collection to {self.backup_path}")
 
     def get_random_headers(self):
         return {
@@ -186,7 +198,7 @@ class Crawler:
                 with self.domain_lock:
                     self.domain_dict[domain]["delay"] += 1
                     delay = self.domain_dict[domain]["delay"]
-                with self.frontier_lock: heapq.heappush(self.frontier, entry)
+                with self.frontier_lock: self.frontier.append(entry)
                 logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
             resp.raise_for_status()
             return resp
@@ -233,8 +245,6 @@ class Crawler:
                    "&oldid=", "&restore=", "&printable=", "action="]
         if any(pattern in url.lower() for pattern in useless): return False
 
-        with self.frontier_lock: existing_urls = {item[1] for item in self.frontier}
-        if url in existing_urls: return False
         with self.visited_lock:
             if url in self.visited_pages: return False
         if self.doc_collection.get_document(url):
@@ -243,6 +253,9 @@ class Crawler:
         # skip mobile versions
         if 'm.wikipedia.org' in url.lower() or '.m.' in url.lower():
             return False
+
+        with self.frontier_lock: existing_urls = {item[1] for item in self.frontier}
+        if url in existing_urls: return False
 
         if not validators.url(url): return False
         if predict_language_from_url(url) not in ["und", "en", "eu", "root"]:
@@ -282,7 +295,7 @@ class Crawler:
 
             priority = -self.relevance_score(url, parent_url)
             with self.frontier_lock:
-                heapq.heappush(self.frontier, (priority, url, parent_url, recrawl))
+                self.frontier.append((priority, url, parent_url, recrawl))
             added += 1
         return added
 
@@ -310,8 +323,11 @@ class Crawler:
             logging.debug("Language detection failed, assuming English")
             return True
 
-    def crawl(self, entry):
-        """Crawl a single URL, extract links, and add them to the frontier."""
+    def crawl(self, entry, lock: threading.Lock):
+        try: self._crawl(entry)
+        finally: lock.release()
+
+    def _crawl(self, entry):
         _, url, parent_url, recrawl = entry
         keywords_found = False
         english = False
@@ -341,13 +357,14 @@ class Crawler:
 
             self.add_document_to_cache(doc)
 
-            urls = set(self.get_linked_urls(url, soup))
+            urls = list(set(self.get_linked_urls(url, soup)))
+            random.shuffle(urls)
+            urls = urls[:100]
             added = self.add_urls_to_frontier(urls, parent_url=url)
             with self.frontier_lock:
                 logging.info(f"Frontier size: {len(self.frontier)}, "
                              f"Added {added}/{len(urls)} URLs from {url}")
-        except BrokenPipeError as e:
-            logging.debug(f"Error crawling {url}: {e}")
+        except BrokenPipeError as e: logging.debug(f"Error crawling {url}: {e}")
         except Exception as e:
             logging.error(f"Error crawling {url}: {e}")
             # exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -364,19 +381,16 @@ class Crawler:
                 logging.debug(
                     f"Visited {len(self.visited_pages)} pages (english={english}, relevance={relevance}, URL: {url})")
 
-            domain = self.get_domain(urlparse(url))
-            with self.domain_lock: self.domain_dict[domain]['in_use'] = False
-
     def run(self, amount: Optional[int] = None):
         if self.auto_resume and self._can_resume():
-            logging.info(f"Auto-resuming from previous state: {self.state_file}")
+            logging.info(f"Auto-resuming from previous state: {self.state_path}")
             try:
-                self.load_state(self.state_file)
+                self.load_state(self.state_path)
             except Exception as e:
                 logging.warning(f"Failed to load previous state: {e}. Starting fresh crawl.")
 
             try:
-                self.doc_collection.load_collection_from_file(self.doc_collection_file)
+                self.doc_collection.load_from_file(self.doc_collection_path)
                 self.add_stale_docs_to_frontier()
             except Exception as e:
                 logging.warning(f"Failed to load document collection: {e}. Starting fresh crawl.")
@@ -388,38 +402,48 @@ class Crawler:
 
         with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
-            while True:
-                prior_time = time.time()
-                with self.visited_lock: amt_visited = len(self.visited_pages)
-                if not amount or amt_visited <= amount:
-                    futures.update(self.schedule_urls(executor))
-                if not futures: break
-
-                post_time = time.time()
-                diff = post_time - prior_time
-                if diff < 2: time.sleep(2 - diff)
+            def update_futures():
                 visiting = list(map(lambda x: x[2], futures))
                 with self.visited_lock: amt_visited     = len(self.visited_pages)
                 with self.domain_lock:  len_domain_dict = len(self.domain_dict)
                 logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, Domain dict size: {len_domain_dict}, '
-                                     f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
-                futures.difference_update(set(filter(lambda f: f[0].done(), futures)))
-        self.cleanup_and_shutdown()
+                                    f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
+                filtered = set(filter(lambda f: f[0].done(), futures))
+                futures.difference_update(filtered)
+
+            try:
+                while True:
+                    prior_time = time.time()
+                    with self.visited_lock: amt_visited = len(self.visited_pages)
+                    if not amount or amt_visited <= amount:
+                        futures.update(self.schedule_urls(executor))
+                    if not futures: break
+
+                    post_time = time.time()
+                    diff = post_time - prior_time
+                    if diff < 2: time.sleep(2 - diff)
+                    update_futures()
+            finally:
+                while futures:
+                    time.sleep(2)
+                    update_futures()
+                self.cleanup_and_shutdown()
 
     def schedule_urls(self, executor: TrackingThreadPoolExecutor):
         futures = set()
+        to_remove = set()
         with self.frontier_lock: frontier = self.frontier.copy()
-        for entry in frontier:
-            if len(futures) > self.max_workers * 2: break
+        for entry in sorted(frontier, key=lambda x: x[0]):
             domain = self.get_domain(urlparse(entry[1]))
             with self.domain_lock:
-                if self.domain_dict[domain].get('in_use'): continue
-                self.domain_dict[domain]['in_use'] = True
+                lock = self.domain_locks[domain]
+                if lock.locked(): continue
+                else: lock.acquire()
 
-            with self.frontier_lock:
-                self.frontier.remove(entry)
-                heapq.heapify(self.frontier)
-            futures.add((executor.submit(self.crawl, entry), time.time(), entry[1]))
+            to_remove.add(entry)
+            futures.add((executor.submit(self.crawl, entry, lock), time.time(), entry[1]))
+        with self.frontier_lock:
+            self.frontier = [entry for entry in self.frontier if entry not in to_remove]
         return futures
 
     def _can_resume(self) -> bool:
@@ -428,14 +452,14 @@ class Crawler:
         is recent enough to resume.
         Returns True if can resume, False otherwise.
         """
-        if not os.path.exists(self.state_file):
-            logging.info(f"State file {self.state_file} not found. Cannot resume.")
+        if not os.path.exists(self.state_path):
+            logging.info(f"State file {self.state_path} not found. Cannot resume.")
             return False
-        if not os.path.exists(self.doc_collection_file):
-            logging.info(f"Document collection file {self.doc_collection_file} not found. Cannot resume.")
+        if not os.path.exists(self.doc_collection_path):
+            logging.info(f"Document collection file {self.doc_collection_path} not found. Cannot resume.")
             return False
 
-        stat = os.stat(self.state_file)
+        stat = os.stat(self.state_path)
         age_hours = (time.time() - stat.st_mtime) / 3600
         logging.info(f"Found recent crawler state ({age_hours:.1f} hours old)")
         return True
@@ -447,7 +471,7 @@ class Crawler:
         with self.frontier_lock: stats['frontier'] = len(self.frontier)
         return stats
 
-    def save_current_state(self, file_path: str = "crawler_state.json"):
+    def save_current_state(self):
         """Save the current frontier and visited pages to a file."""
         with self.visited_lock, self.frontier_lock:
             state = {
@@ -455,8 +479,8 @@ class Crawler:
                 "frontier": list(self.frontier),
             }
         with self.write_lock:
-            with open(file_path, 'w') as f: json.dump(state, f)
-            logging.debug(f"Saved current state to {file_path}")
+            with open(self.state_path, 'w') as f: json.dump(state, f)
+        logging.debug(f"Saved current state to {self.state_path}")
 
     def load_state(self, state_file: str):
         """Load the frontier and visited pages from a file."""
@@ -466,7 +490,6 @@ class Crawler:
 
                 frontier_data = state.get('frontier', [])
                 self.frontier = [tuple(item) for item in frontier_data if isinstance(item, list) and len(item) == 4]
-                heapq.heapify(self.frontier)
 
                 self.visited_pages = state.get('visited_pages', {})
             logging.info(f"Loaded crawler state from {state_file}")
@@ -497,7 +520,7 @@ class Crawler:
         logging.info("Crawler is shutting down, performing cleanup...")
         self.finalize_crawl(backup=True)
         if self.auto_resume:
-            self.save_current_state(self.state_file)
+            self.save_current_state()
 
         stats = self.get_crawling_stats()
         logging.info(f"Final stats: {stats}")

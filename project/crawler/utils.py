@@ -28,6 +28,7 @@ def predict_language_from_url(url: str) -> str:
 
     # keywords checks
     if 'english' in url: return 'en'
+    if '.cn/' in url: return 'zh'
 
     # Path prefix: /de/... or /pt-br/...
     if parsed.path:
