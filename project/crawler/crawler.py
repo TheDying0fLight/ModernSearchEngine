@@ -17,7 +17,6 @@ import requests
 import time
 import threading
 import multiprocessing
-import heapq
 import sys
 import traceback
 
@@ -78,7 +77,6 @@ class Crawler:
         # initialize as (priority, url, parent_url, recrawl) tuples - parent_url is None for seed URLs
         initial_urls = [(0.0, url, None, False) for url in (seed or [])]
         self.frontier = initial_urls
-        heapq.heapify(self.frontier)
 
         self.visited_lock = threading.Lock()
         self.visited_pages = {}
@@ -201,7 +199,7 @@ class Crawler:
                 with self.domain_lock:
                     self.domain_dict[domain]["delay"] += 1
                     delay = self.domain_dict[domain]["delay"]
-                with self.frontier_lock: heapq.heappush(self.frontier, entry)
+                with self.frontier_lock: self.frontier.append(entry)
                 logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
             resp.raise_for_status()
             return resp
@@ -248,8 +246,6 @@ class Crawler:
                    "&oldid=", "&restore=", "&printable=", "action="]
         if any(pattern in url.lower() for pattern in useless): return False
 
-        with self.frontier_lock: existing_urls = {item[1] for item in self.frontier}
-        if url in existing_urls: return False
         with self.visited_lock:
             if url in self.visited_pages: return False
         if self.doc_collection.get_document(url):
@@ -258,6 +254,9 @@ class Crawler:
         # skip mobile versions
         if 'm.wikipedia.org' in url.lower() or '.m.' in url.lower():
             return False
+
+        with self.frontier_lock: existing_urls = {item[1] for item in self.frontier}
+        if url in existing_urls: return False
 
         if not validators.url(url): return False
         if predict_language_from_url(url) not in ["und", "en", "eu", "root"]:
@@ -297,7 +296,7 @@ class Crawler:
 
             priority = -self.relevance_score(url, parent_url)
             with self.frontier_lock:
-                heapq.heappush(self.frontier, (priority, url, parent_url, recrawl))
+                self.frontier.append(priority, url, parent_url, recrawl)
             added += 1
         return added
 
@@ -364,8 +363,7 @@ class Crawler:
             with self.frontier_lock:
                 logging.info(f"Frontier size: {len(self.frontier)}, "
                              f"Added {added}/{len(urls)} URLs from {url}")
-        except BrokenPipeError as e:
-            logging.debug(f"Error crawling {url}: {e}")
+        except BrokenPipeError as e: logging.debug(f"Error crawling {url}: {e}")
         except Exception as e:
             logging.error(f"Error crawling {url}: {e}")
             # exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -428,8 +426,7 @@ class Crawler:
         futures = set()
         to_remove = set()
         with self.frontier_lock: frontier = self.frontier.copy()
-        for entry in frontier:
-            if not len(futures) < self.max_workers: break
+        for entry in sorted(frontier, key=lambda x: x[0]):
             domain = self.get_domain(urlparse(entry[1]))
             with self.domain_lock:
                 lock = self.domain_locks[domain]
@@ -440,7 +437,6 @@ class Crawler:
             futures.add((executor.submit(self.crawl, entry, lock), time.time(), entry[1]))
         with self.frontier_lock:
             self.frontier = [entry for entry in self.frontier if entry not in to_remove]
-            heapq.heapify(self.frontier)
         return futures
 
     def _can_resume(self) -> bool:
@@ -487,7 +483,6 @@ class Crawler:
 
                 frontier_data = state.get('frontier', [])
                 self.frontier = [tuple(item) for item in frontier_data if isinstance(item, list) and len(item) == 4]
-                heapq.heapify(self.frontier)
 
                 self.visited_pages = state.get('visited_pages', {})
             logging.info(f"Loaded crawler state from {state_file}")

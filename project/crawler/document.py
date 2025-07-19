@@ -19,7 +19,7 @@ class Document:
     DEFAULT_KEYWORDS = (r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau',
                         r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen')
 
-    url: str
+    url: str = ""
     title: str = ""
     content_hash: str = field(default="", init=False)
 
@@ -116,7 +116,7 @@ class Document:
             f.write(json.dumps(self.info_to_dict()) + "\n")
         html_path = os.path.join(path, HTML_FILE)
         with open(html_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"html": self.html}) + "\n")
+            f.write(json.dumps({self.url: self.html}) + "\n")
 
     def load_from_dict(self, data: Dict):
         for key, value in data.items():
@@ -150,7 +150,7 @@ class Document:
 
 class DocumentCollection:
     def __init__(self):
-        self.documents: Dict[str, Document] = {}
+        self.documents: Dict[str, Document] = defaultdict(Document)
         self.content_hashes: Dict[str, str] = {}
         self.domain_documents: Dict[str, List[str]] = defaultdict(list)
 
@@ -182,16 +182,13 @@ class DocumentCollection:
     def write_collection_to_file(self, path: str = "data"):
         """ Save the document collection to two files in JSONL format, one document per line."""
         info_path = os.path.join(path, DOCS_FILE)
-        with open(info_path, 'w', encoding='utf-8') as f:
-            for _, doc in self.documents.items():
-                f.write(json.dumps(doc.info_to_dict()) + "\n")
-        logging.info(f"Saved {len(self.documents)} documents to {info_path}")
-
         html_path = os.path.join(path, HTML_FILE)
-        with open(html_path, 'w', encoding='utf-8') as f:
-            for _, doc in self.documents.items():
-                f.write(json.dumps({"url": doc.url, "html": doc.html}) + "\n")
-        logging.info(f"Saved {len(self.documents)} documents to {html_path}")
+        with open(info_path, 'w', encoding='utf-8') as docs:
+            with open(html_path, 'w', encoding='utf-8') as html:
+                for _, doc in self.documents.items():
+                    html.write(json.dumps({doc.url: doc.html}) + "\n")
+                    docs.write(json.dumps(doc.info_to_dict()) + "\n")
+            logging.info(f"Saved {len(self.documents)} documents to {info_path} and {html_path}")
 
     def load_from_file(self, dir_path: str, load_html: bool = False):
         base = Path(dir_path)
@@ -213,21 +210,18 @@ class DocumentCollection:
             except Exception as e:
                 logging.error(f"Error in {fn}: {e}")
 
-    def _add_doc(self, d):
+    def _add_doc(self, d: dict):
         doc = Document(url="")
         doc.load_from_dict(d)
         if doc.url:
-            print(doc.url)
             self.documents[doc.url] = doc
         else:
             logging.warning("Skipped doc without URL: %r", d)
 
-    def _add_html(self, h):
-        url, html = h.get("url"), h.get("html")
-        print(url)
-        if url in self.documents and html:
-            print(len(html))
-            self.documents[url].html = html
+    def _add_html(self, h: dict):
+        url = list(h.keys())[0]
+        html = h[url]
+        self.documents[url].html = html
 
     def get_document(self, url: str) -> Optional[Document]:
         return self.documents.get(url)

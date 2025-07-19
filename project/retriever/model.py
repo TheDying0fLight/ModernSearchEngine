@@ -28,12 +28,8 @@ class SiglipStyleModel(nn.Module):
         return self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt", max_length=512).to(device)
 
     def forward(self, query: str | list[str], answer: str | list[str], return_loss: bool = True):
-        tok_query = self.tokenize(query)
-        tok_answ = self.tokenize(answer)
-        out_query = self.encoder(**tok_query).pooler_output
-        out_answ = self.encoder(**tok_answ).pooler_output
-        out_query = out_query / out_query.norm(p=2, dim=-1, keepdim=True)
-        out_answ = out_answ / out_answ.norm(p=2, dim=-1, keepdim=True)
+        out_query = self.embed(query)
+        out_answ = self.embed(answer)
         logits = out_query @ out_answ.t()  # + self.bias
         if return_loss:
             match self.loss_type:
