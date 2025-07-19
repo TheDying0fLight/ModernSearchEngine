@@ -53,10 +53,6 @@ class SearchBar(ft.SearchBar):
         """Handle suggestion selection"""
         self.submit(suggestion)
 
-    def handle_voice_search(self, e):
-        # TODO: Implement voice search functionality
-        print("Voice search clicked - feature coming soon!")
-
 
     def submit(self, data):
         """Submit search query with enhanced feedback"""
