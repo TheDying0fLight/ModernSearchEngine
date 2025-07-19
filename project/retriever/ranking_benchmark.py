@@ -91,8 +91,10 @@ class ranking_benchmark:
 
 
 model = ColSentenceModel()
-model_path = "./clip/ColSent/bert-mini/b64_lr1E-06_microsoft/ms_marcov2.1/"
-model_name = "model.safetensors"
+# model_path = "./clip/ColSent/bert-mini/b64_lr1E-06_microsoft/ms_marcov2.1/"
+# model_name = "model.safetensors"
+model_path = "project/retriever/model_uploads/"
+model_name = "bmini_ColSent_b128_marco_v1.safetensors"
 model.load(model_path+model_name)
 benchmark = ranking_benchmark("microsoft/ms_marco", "v2.1", "[rank]", model_path)
 benchmark.benchmark(model)
