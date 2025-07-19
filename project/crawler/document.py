@@ -45,6 +45,7 @@ class Document:
     relevance_score: int = 0
 
     last_crawl_timestamp: float = field(default_factory=time.time)
+    soup: BeautifulSoup = None
 
     def __post_init__(self):
         parsed_url = urlparse(self.url)
@@ -61,11 +62,15 @@ class Document:
         if self.content_hash == "":
             self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
 
+    def get_soup(self) -> BeautifulSoup:
+        if not self.soup and self.html:
+            self.soup = BeautifulSoup(self.html, 'lxml')
+        return self.soup
+
     def get_content(self) -> str:
-        """ Returns the content of the document, extracting text from HTML."""
         if not self.html:
             return ""
-        soup = BeautifulSoup(self.html, 'html.parser')
+        soup = self.get_soup()
         return soup.get_text(separator=' ', strip=True)
 
     def _update_html(self, html: str):
@@ -76,7 +81,7 @@ class Document:
             self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
 
     def update_metrics(self):
-        soup = BeautifulSoup(self.html, 'html.parser')
+        soup = self.get_soup()
         text = soup.get_text(separator=' ', strip=True)
         self.title = soup.title.string if soup.title and soup.title.string else ""
         self.word_count = len(text.split())

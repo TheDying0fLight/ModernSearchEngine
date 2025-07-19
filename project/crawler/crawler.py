@@ -63,6 +63,8 @@ class Crawler:
         self.max_workers = max_workers
         self.auto_resume = auto_resume
 
+        self.path = path
+        self.backup_path = f"{path}_backup"
         self.state_path = os.path.join(path, STATE_FILE)
         self.doc_collection_path = os.path.join(path, DOCS_FILE)
         self.html_path = os.path.join(path, HTML_FILE)
@@ -93,11 +95,20 @@ class Crawler:
         recrawl_interval = 60 * 60 * 24 * 7  # recrawl if site is older than 7 days
         self.recrawl_interval = recrawl_interval  # seconds
 
-        if not auto_resume:
-            for file in [self.state_path, self.doc_collection_path, self.html_path]:
-                if os.path.exists(file):
+        for file in [self.state_path, self.doc_collection_path, self.html_path]:
+            backup_file = file.replace(self.path, self.backup_path)
+            if os.path.exists(file):
+                if not auto_resume:
                     os.remove(file)
                     logging.info(f"Removed existing file: {file}")
+            if os.path.exists(backup_file):
+                if not auto_resume:
+                    os.remove(backup_file)
+                    logging.info(f"Removed existing backup file: {backup_file}")
+            else:
+                os.makedirs(os.path.dirname(file), exist_ok=True)
+                # also create backup folder structure
+                os.makedirs(os.path.dirname(backup_file), exist_ok=True)
 
     def get_domain(self, parse: ParseResult):
         return ".".join(parse.hostname.split(".")[-2:]) if parse.hostname else ""
@@ -118,7 +129,7 @@ class Crawler:
                     self._write_pending_data()
                     should_save_state = True
 
-        if should_save_state: self.save_current_state(self.state_path)
+        if should_save_state: self.save_current_state()
 
     def _write_pending_data(self):
         """Write pending data to file. Must be called with write_lock held."""
@@ -128,7 +139,7 @@ class Crawler:
         try:
             # append all pending docs to file
             for doc in self.pending_docs:
-                self.doc_collection.add_document_and_save(doc, self.doc_collection_path)
+                self.doc_collection.add_document_and_save(doc, self.path)
                 full_doc = self.doc_collection.get_document(doc.url)
                 if full_doc:
                     full_doc.html = ""  # clear HTML to save memory
@@ -151,10 +162,8 @@ class Crawler:
 
             # save entire collection as backup
             if self.doc_collection_path and self.doc_collection.documents and backup:
-                backup_file = self.doc_collection_path.replace('.jsonl', '_complete.jsonl')
-                html_path = self.doc_collection_path.replace('docs', 'html_complete')
-                self.doc_collection.write_collection_to_file(info_path=backup_file, html_path=html_path)
-                logging.info(f"Saved backup collection to {backup_file}")
+                self.doc_collection.write_collection_to_file(self.backup_path)
+                logging.info(f"Saved backup collection to {self.backup_path}")
 
     def get_random_headers(self):
         return {
@@ -452,7 +461,7 @@ class Crawler:
         with self.frontier_lock: stats['frontier'] = len(self.frontier)
         return stats
 
-    def save_current_state(self, file_name: str = "crawler_state.json"):
+    def save_current_state(self):
         """Save the current frontier and visited pages to a file."""
         with self.visited_lock, self.frontier_lock:
             state = {
@@ -502,7 +511,7 @@ class Crawler:
         logging.info("Crawler is shutting down, performing cleanup...")
         self.finalize_crawl(backup=True)
         if self.auto_resume:
-            self.save_current_state(self.state_path)
+            self.save_current_state()
 
         stats = self.get_crawling_stats()
         logging.info(f"Final stats: {stats}")
