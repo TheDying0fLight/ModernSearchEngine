@@ -50,8 +50,7 @@ class Crawler:
     def __init__(self,
                  seed: list[str],
                  max_workers: int = multiprocessing.cpu_count() // 2,
-                 keywords: list = [r't\S{1,6}bingen', 'eberhard karl', 'palmer',
-                                   'lustnau', r's\S{1,6}dstadt', 'neckar island', 'bebenhausen'],
+                 keywords: list = [r't\S{1,6}bingen', 'neckar island'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = False,
                  auto_resume: bool = False,
@@ -358,7 +357,9 @@ class Crawler:
 
             self.add_document_to_cache(doc)
 
-            urls = set(self.get_linked_urls(url, soup))
+            urls = list(set(self.get_linked_urls(url, soup)))
+            random.shuffle(urls)
+            urls = urls[:100]
             added = self.add_urls_to_frontier(urls, parent_url=url)
             with self.frontier_lock:
                 logging.info(f"Frontier size: {len(self.frontier)}, "
