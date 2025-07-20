@@ -62,14 +62,15 @@ class SearchEnginePage:
 
     def route_change(self, route):
         template_route = ft.TemplateRoute(self.page.route)
-        if template_route.match('/search?:q'):
+        if template_route.match('/search?:q&:c'):
             query = template_route.q.split('=')[1]
+            cluster_option = template_route.c.split('=')[1]
             if not query.strip():
                 self.page.go('/')
                 return
             self.navigate_to_search_tab()
             self.search_tab.start_loading(query)
-            self.search(query)
+            self.search(query, cluster_option)
         else:
             self.page.go('/')
     def navigate_to_search_tab(self):
@@ -77,9 +78,9 @@ class SearchEnginePage:
         self.tabs.selected_index = 0
         self.tabs.update()
 
-    def search(self, query: str):
+    def search(self, query: str, cluster_option: str):
         """Enhanced search function with loading state"""
-        clustering_algo = self.possible_clustering_algos[self.search_tab.header.get_cluster_option()]
+        clustering_algo = self.possible_clustering_algos[cluster_option]
         results = self.search_engine.search_and_cluster(query, clustering_algo)
         results = [[self.convert_doc(res) for res in topic] for topic in results]
 

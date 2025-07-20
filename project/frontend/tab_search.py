@@ -1,4 +1,5 @@
 import flet as ft
+import re
 from .components import LoadingIndicator, EmptyState, SearchBar
 from .results_view import ResultsView, Result
 from.tab import Tab
@@ -11,10 +12,10 @@ class SearchTab(Tab):
         self.on_favorite_toggle = on_favorite_toggle
 
         # Initialize components
-        self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}'))
+        self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}&c={self.header.get_cluster_option()}'))
         self.loading_indicator = LoadingIndicator("Searching documents...")
         self.results_view = ResultsView(self.handle_favorite_toggle, self.handle_result_click)
-        self.header = SearchHeader(self.search_bar, clustering_options)
+        self.header = SearchHeader(self.page, self.search_bar, clustering_options)
 
         #self.advanced_options = AdvancedSearchOptions()
 
@@ -58,12 +59,18 @@ class SearchTab(Tab):
         self.results_view.hide_results()
 
 class SearchHeader(ft.Row):
-    def __init__(self, search_bar: SearchBar, cluster_options = list[str]):
+    def __init__(self, page: ft.Page, search_bar: SearchBar, cluster_options = list[str]):
+        self.side_width = 250
+        self.page = page
         self.dropdown = ft.Dropdown(
             value=cluster_options[0],
-            options=[ft.DropdownOption(s) for s in cluster_options], width=150)
+            options=[ft.DropdownOption(s) for s in cluster_options], width=self.side_width,
+            color=ft.Colors.GREY_600,
+            on_change=lambda e: self.on_cluster_option_change()
+        )
+
         super().__init__([
-            ft.Column([], width=200),
+            ft.Column([], width=self.side_width),
             ft.Column([
                 ft.Text(
                     "🔍 Tübingen Search",
@@ -81,12 +88,18 @@ class SearchHeader(ft.Row):
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True),
             ft.Column(
                 [self.dropdown],
-                width=200,
-                alignment=ft.CrossAxisAlignment.END),
-            ], ft.CrossAxisAlignment.START)
+                width=self.side_width,
+                alignment=ft.MainAxisAlignment.START,
+                horizontal_alignment=ft.CrossAxisAlignment.END),
+            ], ft.CrossAxisAlignment.START, spacing=0)
 
     def get_cluster_option(self):
         return self.dropdown.value
+
+    def on_cluster_option_change(self):
+        pattern = r'(search\?q=.*&c=)(.*)'
+        new_route = re.sub(pattern, lambda m: m.group(1) + self.get_cluster_option(), self.page.route)
+        self.page.go(new_route)
 
 class AdvancedSearchOptions(ft.ExpansionTile):
     def __init__(self):
