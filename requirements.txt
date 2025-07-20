@@ -87,7 +87,7 @@ pyppeteer
 pyquery
 python-dateutil
 pytz
-pywin32
+# pywin32
 pyzmq
 regex
 requests
