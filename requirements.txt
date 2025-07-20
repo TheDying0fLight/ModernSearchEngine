@@ -28,6 +28,7 @@ exceptiongroup
 executing
 fake-useragent
 filelock
+flet
 frozenlist
 fsspec
 gitdb
@@ -86,8 +87,9 @@ pyppeteer
 pyquery
 python-dateutil
 pytz
-pywin32
+# pywin32
 pyzmq
+readability-lxml
 regex
 requests
 requests-file

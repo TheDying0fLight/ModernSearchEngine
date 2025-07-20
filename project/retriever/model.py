@@ -8,6 +8,7 @@ import nltk
 import math
 import numpy as np
 import re
+from sentence_transformers import SentenceTransformer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -21,6 +22,10 @@ class SiglipStyleModel(nn.Module):
         self.encoder = AutoModel.from_pretrained(model_name, trust_remote_code=True)
         self.bias = nn.Parameter(torch.zeros(1))
         self.to(device)
+
+    # dummy return to keep this model compatible with search.py, which calls sentence_sim
+    def sentence_sim(self, doc_tokens, query_tokens):
+        return torch.zeros((1,doc_tokens)).to(device)
 
     def tokenize(self, texts: str | list[str]):
         return self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt", max_length=512).to(device)
@@ -61,7 +66,7 @@ class SiglipStyleModel(nn.Module):
 
 
 class ColSentenceModel(nn.Module):
-    def __init__(self, model_name="prajjwal1/bert-mini", embed_size=128, loss_type="siglip"):
+    def __init__(self, model_name="prajjwal1/bert-mini", embed_size=128, loss_type="siglip", use_max_sim=True):
         super().__init__()
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -69,6 +74,7 @@ class ColSentenceModel(nn.Module):
         self.token_mapper = nn.Linear(self.bert_model.pooler.dense.out_features, embed_size)
         self.loss_type = loss_type
         nltk.download('punkt_tab')  # install the sentence level tokenizer
+        self.use_max_sim = use_max_sim
         self.to(device)
     """
     def loss_function(self, predictions, gt_labels):
@@ -80,29 +86,45 @@ class ColSentenceModel(nn.Module):
     # doc_tokens: (batch_size, doc tokens (num sentences) -> may have padding, embedding size)
     # query_tokens: (batch_size, embedding size, query tokens (num sentences) -> may have padding)
 
-    def max_sim(self, doc_tokens, query_tokens, sentence_wise, full_mat=True):
-        if full_mat:
-            desired_query_shape = (query_tokens.shape[0], doc_tokens.shape[0],
-                                   query_tokens.shape[1], query_tokens.shape[2])
-            desired_doc_shape = (query_tokens.shape[0], doc_tokens.shape[0], doc_tokens.shape[1], doc_tokens.shape[2])
-            query_tokens = query_tokens.unsqueeze(1).expand(desired_query_shape).flatten(0, 1)
-            doc_tokens = doc_tokens.unsqueeze(0).expand(desired_doc_shape).flatten(0, 1)
-            if sentence_wise:
-                return torch.sum(torch.bmm(doc_tokens, query_tokens), dim=2).reshape((desired_query_shape[0], desired_query_shape[1], desired_doc_shape[2]))
-            else:
-                # shape after bmm (batch size, #doc_tokens, #query_tokens)
-                return torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
+    def sentence_sim(self, doc_tokens, query_tokens):
+        query_tokens, doc_tokens, desired_query_shape, desired_doc_shape = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
+        return torch.sum(torch.bmm(doc_tokens, query_tokens), dim=2).reshape((desired_query_shape[0], desired_query_shape[1], desired_doc_shape[2]))
+
+    def max_sim(self, doc_tokens, query_tokens):
+        query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
+        # shape after bmm (batch size, #doc_tokens, #query_tokens)
+        return torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
+
+    def avg_sim(self, doc_tokens, query_tokens):
+        query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
+        # shape after bmm (batch size, #doc_tokens, #query_tokens)
+        return torch.sum(torch.mean(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True), dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
+
+    def sim_preprocess(self, doc_tokens, query_tokens):
+        # ASSUMPTION: if incoming tensor is not 3D then we assume the batch dimension was lost and restore it
+        if len(query_tokens.shape) == 2:
+            query_tokens = query_tokens.unsqueeze(0)
+        if len(doc_tokens.shape) == 2:
+            doc_tokens = doc_tokens.unsqueeze(0) 
+
+        # bring query token into expected shape
+        query_tokens = query_tokens.transpose(1, 2) 
+        desired_query_shape = (query_tokens.shape[0], doc_tokens.shape[0],
+                                query_tokens.shape[1], query_tokens.shape[2])
+        desired_doc_shape = (query_tokens.shape[0], doc_tokens.shape[0], doc_tokens.shape[1], doc_tokens.shape[2])
+        query_tokens = query_tokens.unsqueeze(1).expand(desired_query_shape).flatten(0, 1)
+        doc_tokens = doc_tokens.unsqueeze(0).expand(desired_doc_shape).flatten(0, 1)
+        return query_tokens, doc_tokens, desired_query_shape, desired_doc_shape
+
+    def resolve(self, query_embeddings, document_embeddings, max_sim=True):
+        if max_sim:
+            return self.max_sim(document_embeddings, query_embeddings)
         else:
-            if sentence_wise:
-                return torch.sum(torch.bmm(doc_tokens, query_tokens), dim=2)
-            else:
-                # shape after bmm (batch size, #doc_tokens, #query_tokens)
-                return torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2)
+            return self.avg_sim(document_embeddings, query_embeddings)
 
-    def resolve(self, query_embeddings, document_embeddings):
-        return self.max_sim(document_embeddings, query_embeddings, sentence_wise=False)
-
-    def embed(self, text, query=True, batch_size=100):  # sentences structure: (batch x sentences) embeddings
+    def embed(self, text, batch_size=100, detach_results = False):  # sentences structure: (batch x sentences) embeddings
+        if isinstance(text, str):
+            text = [text] # wrap, because we expect something batch
         sentences, idx_map = self.extract_sentences(text)
         max_idx = 0
         embedding_tensors = []
@@ -114,13 +136,12 @@ class ColSentenceModel(nn.Module):
                                     truncation=True, max_length=512).to(device)
             embeddings = self.bert_model(**tokens).pooler_output
             final_embeddings = torch.nn.functional.normalize(self.token_mapper(embeddings), dim=1)
+            if detach_results:
+                final_embeddings = final_embeddings.detach().cpu()
             embedding_tensors.append(final_embeddings)
             torch.cuda.empty_cache() # embedding tensors are not freed up, but the model itself may be able to free up some space
         final_embeddings = torch.cat(embedding_tensors, dim=0)
-        if query:
-            return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True).transpose(1, 2)
-        else:
-            return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True)
+        return torch.nn.utils.rnn.pad_sequence([final_embeddings[start:end] for start, end in idx_map], batch_first=True)
 
     def extract_sentences(self, texts):
         sentence_lists = []
@@ -134,9 +155,15 @@ class ColSentenceModel(nn.Module):
         return sentence_lists, idx_map
 
     def forward(self, query, answer, return_loss=True, sentence_wise=False):
-        query_embeddings = self.embed(query, query=True)
-        document_embeddings = self.embed(answer, query=False)
-        logits = self.max_sim(document_embeddings, query_embeddings, sentence_wise)
+        query_embeddings = self.embed(query)
+        document_embeddings = self.embed(answer)
+        if self.use_max_sim:
+            if sentence_wise:
+                logits = self.sentence_sim(document_embeddings, query_embeddings)
+            else:
+                logits = self.max_sim(document_embeddings, query_embeddings)
+        else:
+            logits = self.avg_sim(document_embeddings, query_embeddings)
         if return_loss:
             match self.loss_type:
                 case "siglip": loss = self.siglip_loss(logits)
@@ -231,3 +258,44 @@ class BM25():
             score += idfs_score * (frequency * (self.k + 1)) / (frequency + self.k *
                                                                 (1 - self.b + self.b * self.doc_lengths[doc_idx] / self.avgdl))
         return score
+
+class MentorModel(nn.Module):
+    def __init__(self):
+        model = SentenceTransformer("infly/inf-retriever-v1", trust_remote_code=True)
+        model.max_seq_length = 8192
+        self.to(device)
+
+    def forward(self, query: str | list[str], answer: str | list[str], return_loss: bool = True):
+        out_query = self.embed(query)
+        out_answ = self.embed(answer)
+        logits = out_query @ out_answ.t()  # + self.bias
+        if return_loss:
+            match self.loss_type:
+                case "siglip": loss = self.siglip_loss(logits)
+                case "clip": loss = clip_loss(logits)
+        else: loss = None
+        return {"loss": loss, "logits": logits}
+
+    def siglip_loss(self, logits: torch.Tensor):
+        sim = logits + self.bias
+        eye = torch.eye(sim.size(0), device=sim.device)
+        y = -torch.ones_like(sim) + 2 * eye
+        loglik = F.logsigmoid(y * sim)
+        nll = -torch.sum(loglik, dim=-1)
+        loss = nll.mean()
+        return loss
+
+    def load(self, path: str):
+        state_dict = load_file(path, device)
+        self.load_state_dict(state_dict, strict=False)
+        return self
+
+    def embed(self, text, query=True):
+        if query:
+            out_embed = self.model.encode(text, prompt_name="query")
+        else:
+            out_embed = self.model.encode(text)
+        return out_embed
+
+    def resolve(self, query_embeddings, document_embeddings):
+        return query_embeddings @ document_embeddings.t()

@@ -10,7 +10,7 @@ from .tab_search import SearchTab
 from .tab_favorites import FavoritesTab
 from .results_view import Result
 
-from project import SearchEngine
+from project import SearchEngine, Document
 
 class SearchEnginePage:
     """Main page of the search engine with component-based architecture"""
@@ -74,6 +74,7 @@ class SearchEnginePage:
             self.search(query, cluster_option)
         else:
             self.page.go('/')
+
     def navigate_to_search_tab(self):
         """Navigate to the search tab"""
         self.tabs.selected_index = 0
@@ -103,14 +104,14 @@ class SearchEnginePage:
             self.favorites_tab.remove_favorite(result_data)
             return True
 
-    def convert_doc(self, doc: dict):
+    def convert_doc(self, doc: Document):
         return Result(
-            url=doc['url'],
-            title=doc['title'].strip('\n'),
-            snippet='...', #doc['snippet'],
-            source=doc['domain'],
-            date=datetime.fromtimestamp(doc['last_crawl_timestamp']),
-            words=doc['word_count']
+            url=doc.url,
+            title=doc.title.strip('\n'),
+            snippet=doc.description.strip("\n"), #doc['snippet'],
+            source=doc.domain,
+            date=datetime.fromtimestamp(doc.last_crawl_timestamp),
+            words=doc.word_count
         )
 
 

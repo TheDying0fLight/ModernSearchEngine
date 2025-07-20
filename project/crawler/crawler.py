@@ -84,6 +84,9 @@ class Crawler:
         self.domain_dict = defaultdict(lambda: defaultdict(int))
         self.domain_locks = defaultdict(threading.Lock)
 
+        self.delay_lock = threading.Lock()
+        self.domain_delay = {}
+
         # initialize document collection
         self.doc_lock = threading.Lock()
         self.doc_collection = DocumentCollection()
@@ -181,23 +184,12 @@ class Crawler:
         domain = self.get_domain(urlparse(url))
         request_fn = requests.head if headers else requests.get
 
-        with self.domain_lock:
-            last_time = self.domain_dict[domain]['last_access']
-            delay = self.domain_dict[domain]['delay']
-        if last_time:
-            now = time.time()
-            delay += DEFAULT_DELAY + random.uniform(0, (delay / 8))
-            wait_time = last_time + delay - now
-            if wait_time > 0: time.sleep(wait_time)
-        with self.domain_lock:
-            self.domain_dict[domain]['last_access'] = time.time()
-
         if not self.use_proxies:
             resp = request_fn(url, headers=self.get_random_headers(), timeout=TIMEOUT)
             if resp.status_code == 429:
-                with self.domain_lock:
-                    self.domain_dict[domain]["delay"] += 1
-                    delay = self.domain_dict[domain]["delay"]
+                with self.delay_lock:
+                    self.domain_delay[domain] = self.domain_delay.get(domain, DEFAULT_DELAY) + 1
+                    delay = self.domain_delay[domain]
                 with self.frontier_lock: self.frontier.append(entry)
                 logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
             resp.raise_for_status()
@@ -339,6 +331,7 @@ class Crawler:
             try: english = Language.get(headers['content-language']).language == 'en'
             except: pass
             html = self.download_site(entry).text
+            if not html: raise Exception("Empty HTML content.")
             if len(html.encode()) > 1e8:
                 raise Exception(f"Page to large, Bytes: {len(html.encode())}, {url}")
 
@@ -385,12 +378,12 @@ class Crawler:
         if self.auto_resume and self._can_resume():
             logging.info(f"Auto-resuming from previous state: {self.state_path}")
             try:
-                self.load_state(self.state_path)
+                self.load_state()
             except Exception as e:
                 logging.warning(f"Failed to load previous state: {e}. Starting fresh crawl.")
 
             try:
-                self.doc_collection.load_from_file(self.doc_collection_path)
+                self.doc_collection.load_from_file(self.path)
                 self.add_stale_docs_to_frontier()
             except Exception as e:
                 logging.warning(f"Failed to load document collection: {e}. Starting fresh crawl.")
@@ -404,10 +397,8 @@ class Crawler:
             futures = set()
             def update_futures():
                 visiting = list(map(lambda x: x[2], futures))
-                with self.visited_lock: amt_visited     = len(self.visited_pages)
-                with self.domain_lock:  len_domain_dict = len(self.domain_dict)
-                logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, Domain dict size: {len_domain_dict}, '
-                                    f'Visited: {amt_visited}, Sites: {visiting[:20]} ...', 'green'))
+                logging.info(colored(f'Active threads: {executor.active_count}, Scheduled: {len(futures)}, '
+                                    f'{self.get_crawling_stats()}, Sites: {visiting[:20]} ...', 'green'))
                 filtered = set(filter(lambda f: f[0].done(), futures))
                 futures.difference_update(filtered)
 
@@ -435,10 +426,20 @@ class Crawler:
         with self.frontier_lock: frontier = self.frontier.copy()
         for entry in sorted(frontier, key=lambda x: x[0]):
             domain = self.get_domain(urlparse(entry[1]))
+
             with self.domain_lock:
+                now = time.time()
+                if self.domain_dict[domain]['next_access'] > now: continue
                 lock = self.domain_locks[domain]
                 if lock.locked(): continue
                 else: lock.acquire()
+
+            with self.delay_lock:
+                delay = self.domain_delay.get(domain, DEFAULT_DELAY)
+                delay += DEFAULT_DELAY + random.uniform(0, (delay / 8))
+
+            with self.domain_lock:
+                self.domain_dict[domain]['next_access'] = now + delay
 
             to_remove.add(entry)
             futures.add((executor.submit(self.crawl, entry, lock), time.time(), entry[1]))
@@ -473,27 +474,29 @@ class Crawler:
 
     def save_current_state(self):
         """Save the current frontier and visited pages to a file."""
-        with self.visited_lock, self.frontier_lock:
+        with self.visited_lock, self.frontier_lock, self.delay_lock:
             state = {
-                "visited_pages": list(self.visited_pages),
-                "frontier": list(self.frontier),
+                "visited_pages": self.visited_pages.copy(),
+                "frontier": self.frontier.copy(),
+                "domain_delay": self.domain_delay.copy(),
             }
         with self.write_lock:
             with open(self.state_path, 'w') as f: json.dump(state, f)
         logging.debug(f"Saved current state to {self.state_path}")
 
-    def load_state(self, state_file: str):
+    def load_state(self):
         """Load the frontier and visited pages from a file."""
         with self.write_lock:
-            with open(state_file, 'r') as f:
+            with open(self.state_path, 'r') as f:
                 state = json.load(f)
 
                 frontier_data = state.get('frontier', [])
                 self.frontier = [tuple(item) for item in frontier_data if isinstance(item, list) and len(item) == 4]
 
                 self.visited_pages = state.get('visited_pages', {})
-            logging.info(f"Loaded crawler state from {state_file}")
-            logging.info(f"Frontier size: {len(self.frontier)}, Visited pages: {len(self.visited_pages)}")
+                self.domain_delay = state.get('domain_delay', {})
+            logging.info(f"Loaded crawler state from {self.state_path}")
+            logging.info(f"Stats: {self.get_crawling_stats()}")
 
     def add_stale_docs_to_frontier(self):
         """
