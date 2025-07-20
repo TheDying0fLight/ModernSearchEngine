@@ -100,18 +100,25 @@ class ColSentenceModel(nn.Module):
         # shape after bmm (batch size, #doc_tokens, #query_tokens)
         return torch.sum(torch.mean(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True), dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
 
+    def restore_shape(self, tokens):
+        if len(tokens.shape) == 2:
+            return tokens.unsqueeze(0)
+        elif len(tokens.shape) == 1:
+            return tokens.unsqueeze(0).unsqueeze(0)
+        else:
+            return tokens
+
     def sim_preprocess(self, doc_tokens, query_tokens):
-        # ASSUMPTION: if incoming tensor is not 3D then we assume the batch dimension was lost and restore it
-        if len(query_tokens.shape) == 2:
-            query_tokens = query_tokens.unsqueeze(0)
-        if len(doc_tokens.shape) == 2:
-            doc_tokens = doc_tokens.unsqueeze(0) 
+        # Remake shape to be 3d. 
+        query_tokens = self.restore_shape(query_tokens)
+        doc_tokens = self.restore_shape(doc_tokens)
 
         # bring query token into expected shape
         query_tokens = query_tokens.transpose(1, 2) 
         desired_query_shape = (query_tokens.shape[0], doc_tokens.shape[0],
                                 query_tokens.shape[1], query_tokens.shape[2])
-        desired_doc_shape = (query_tokens.shape[0], doc_tokens.shape[0], doc_tokens.shape[1], doc_tokens.shape[2])
+        desired_doc_shape = (query_tokens.shape[0], doc_tokens.shape[0], 
+                             doc_tokens.shape[1], doc_tokens.shape[2])
         query_tokens = query_tokens.unsqueeze(1).expand(desired_query_shape).flatten(0, 1)
         doc_tokens = doc_tokens.unsqueeze(0).expand(desired_doc_shape).flatten(0, 1)
         return query_tokens, doc_tokens, desired_query_shape, desired_doc_shape
