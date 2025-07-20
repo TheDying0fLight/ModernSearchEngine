@@ -1,5 +1,5 @@
 import flet as ft
-import time
+from datetime import datetime
 import logging
 import urllib.parse
 
@@ -9,11 +9,14 @@ from .tab_search import SearchTab
 from .tab_favorites import FavoritesTab
 from .results_view import Result
 
+from project import SearchEngine, Document
+
 class SearchEnginePage:
     """Main page of the search engine with component-based architecture"""
 
-    def __init__(self, page: ft.Page):
+    def __init__(self, page: ft.Page, search_engine: SearchEngine):
         self.page = page
+        self.search_engine = search_engine
         self.page.on_route_change = self.route_change
         self.is_searching = False
         self.current_results = []
@@ -75,9 +78,11 @@ class SearchEnginePage:
 
     def search(self, query: str):
         """Enhanced search function with loading state"""
-        mock_results = self.generate_mock_results(query)
-        self.search_tab.display_results(query, mock_results)
-        self.history_tab.add_to_history(query, len(mock_results))
+        results = self.search_engine.search_and_cluster(query)
+        results = [[self.convert_doc(res) for res in topic] for topic in results]
+
+        self.search_tab.display_results(query, results)
+        self.history_tab.add_to_history(query, len(results)) # TODO
 
     def search_from_history(self, query):
         """Search triggered from history tab"""
@@ -94,44 +99,31 @@ class SearchEnginePage:
             self.favorites_tab.remove_favorite(result_data)
             return True
 
-    def generate_mock_results(self, query: str):
-        """Generate mock search results based on query"""
-        # Enhanced mock results with more variety
-        all_results = MOCK_RESULTS
-        time.sleep(1)
-
-        # Filter results based on query relevance
-        query_lower = query.lower()
-        relevant_results = []
-
-        for result in all_results:
-            title_lower = result.title.lower()
-            snippet_lower = result.snippet.lower()
-
-            # Simple relevance scoring
-            if any(word in title_lower or word in snippet_lower for word in query_lower.split()):
-                relevant_results.append(result)
-
-        # Return relevant results or all results if no specific matches
-        return [relevant_results if relevant_results else all_results[:3] for _ in range(3)]
-
+    def convert_doc(self, doc: Document):
+        return Result(
+            url=doc.url,
+            title=doc.title.strip('\n'),
+            snippet=doc.description.strip("\n"), #doc['snippet'],
+            source=doc.domain,
+            date=datetime.fromtimestamp(doc.last_crawl_timestamp),
+            words=doc.word_count
+        )
 
 
 class PageFactory:
     """Creates new pages of type `SearchEnginePage`"""
     def __init__(self):
-        pass
+        self.search_engine = SearchEngine()
 
     def create_page(self, page: ft.Page):
-            search_engine_page = SearchEnginePage(page)
-            def on_connect(e):
-                page.clean()
-                search_engine_page.build_layout()
-            page.on_connect = on_connect
+        search_engine_page = SearchEnginePage(page, self.search_engine)
+        def on_connect(e):
+            page.clean()
+            search_engine_page.build_layout()
+        page.on_connect = on_connect
 
     def run(self, host: str, port: int):
         ft.app(self.create_page, view=ft.AppView.WEB_BROWSER, host=host, port=port)
-
 
 
 MOCK_RESULTS =  [
@@ -140,9 +132,9 @@ MOCK_RESULTS =  [
         snippet = "Comprehensive guide to Tübingen's medieval architecture, historic buildings, and cultural landmarks in the old town area.",
         source = "Tourism Board Archives",
         date = "15.11.2024",
-        pages = "24",
+        words = "24",
         url = "https://de.wikipedia.org/wiki/Tübingen",
-        example_sentence_scores = [
+        sentence_scores = [
             0.0, 0.2, 0.3, 0.7, 0.0, 0.2, 0.3, 0.5, 1.0, 0.3,
             0.1, 0.8, 0.4, 0.2, 0.9, 0.1, 0.6, 0.3, 0.7, 0.0,
             0.5, 0.2, 0.8, 0.1, 0.4, 0.9, 0.3, 0.6, 0.0, 0.7,
@@ -155,9 +147,9 @@ MOCK_RESULTS =  [
         snippet = "The story of one of Germany's oldest universities, its famous alumni, and its impact on the city's development.",
         source = "University Archives",
         date = "03.09.2024",
-        pages = "45",
+        words = "45",
         url = "https://de.wikipedia.org/wiki/Tübingen",
-        example_sentence_scores = [
+        sentence_scores = [
             0.5, 0.9, 0.7, 0.3, 0.8, 0.1, 0.6, 0.4, 0.2, 0.9,
             0.3, 0.7, 0.0, 0.5, 0.8, 0.2, 0.6, 0.9, 0.1, 0.4
         ],
@@ -167,9 +159,9 @@ MOCK_RESULTS =  [
         snippet = "A culinary journey through Tübingen's traditional food scene, featuring local specialties, historic restaurants, and brewing traditions.",
         source = "Regional Food Heritage Archive",
         date = "22.08.2024",
-        pages = "18",
+        words = "18",
         url = "https://de.wikipedia.org/wiki/Tübingen",
-        example_sentence_scores = [
+        sentence_scores = [
             0.8, 0.2, 0.6, 0.9, 0.1, 0.4, 0.7, 0.3, 0.5, 0.8,
             0.0, 0.6, 0.4, 0.9, 0.2, 0.7, 0.1, 0.5, 0.8, 0.3
         ],
@@ -179,9 +171,9 @@ MOCK_RESULTS =  [
         snippet = "The transformation of Tübingen's castle from medieval fortress to modern museum, including archaeological discoveries.",
         source = "Museum Documentation",
         date = "07.10.2024",
-        pages = "31",
+        words = "31",
         url = "https://de.wikipedia.org/wiki/Tübingen",
-        example_sentence_scores = [
+        sentence_scores = [
             0.3, 0.8, 0.1, 0.6, 0.9, 0.2, 0.5, 0.7, 0.0, 0.4,
             0.8, 0.3, 0.9, 0.1, 0.6, 0.4, 0.7, 0.2, 0.5, 0.8
         ],
@@ -191,9 +183,9 @@ MOCK_RESULTS =  [
         snippet = "How the Neckar River shaped Tübingen's history, from trade routes to modern recreational activities.",
         source = "Environmental History Society",
         date = "12.07.2024",
-        pages = "16",
+        words = "16",
         url = "https://de.wikipedia.org/wiki/Tübingen",
-        example_sentence_scores = [
+        sentence_scores = [
             0.6, 0.1, 0.8, 0.4, 0.2, 0.9, 0.3, 0.7, 0.5, 0.0,
             0.8, 0.6, 0.2, 0.9, 0.1, 0.5, 0.7, 0.3, 0.4, 0.8
         ],
@@ -203,9 +195,9 @@ MOCK_RESULTS =  [
         snippet = "Annual festivals, cultural events, and celebrations that define Tübingen's vibrant community life.",
         source = "Cultural Events Archive",
         date = "28.06.2024",
-        pages = "22",
+        words = "22",
         url = "https://de.wikipedia.org/wiki/Tübingen",
-        example_sentence_scores = [
+        sentence_scores = [
             0.9, 0.3, 0.7, 0.1, 0.5, 0.8, 0.0, 0.4, 0.6, 0.9,
             0.2, 0.7, 0.5, 0.3, 0.8, 0.1, 0.6, 0.4, 0.9, 0.0
         ],
