@@ -97,7 +97,7 @@ class SearchEnginePage:
     def convert_doc(self, doc: dict):
         return Result(
             url=doc['url'],
-            title=doc['title'],
+            title=doc['title'].strip('\n'),
             snippet='...', #doc['snippet'],
             source=doc['domain'],
             date=datetime.fromtimestamp(doc['last_crawl_timestamp']),

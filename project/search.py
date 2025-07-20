@@ -1,6 +1,8 @@
 import torch
 import os
 import json
+import nltk
+from nltk.corpus import stopwords
 from tqdm import tqdm
 import numpy as np
 from project import SiglipStyleModel, ColSentenceModel, DOCS_FILE, HTML_FILE
@@ -12,7 +14,7 @@ class SearchEngine():
         self.embedding_dict = self._load_embeddings(path=os.path.join(data_folder, embedding_file))
         self.docs = self._load_docs(path=os.path.join(data_folder, DOCS_FILE))
         # self._load_snippets(path=os.path.join(data_folder, HTML_FILE))
-        self.stop_words = self._load_stop_words(path=os.path.join(data_folder, "stopwords.txt"))
+        self.stop_words = self._load_stop_words()
         # model = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
         self.model: SiglipStyleModel | ColSentenceModel = SiglipStyleModel().load(r"project/retriever/model_uploads/bert-mini_b32_marco_v1.safetensors")
 
@@ -47,10 +49,9 @@ class SearchEngine():
     #     return text.strip()[:max_char]
 
 
-    def _load_stop_words(self, path: str):
-        with open(path, 'r', encoding='utf-8') as f:
-            stopwords = [line.strip() for line in f if line.strip()]
-        return stopwords
+    def _load_stop_words(self):
+        nltk.download('stopwords')
+        return set(stopwords.words('english'))
 
     def retrieve(self, query: str):
         similarities = []
