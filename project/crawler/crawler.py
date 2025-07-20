@@ -399,7 +399,6 @@ class Crawler:
             print(self.get_crawling_stats())
             if isinstance(self.visited_pages, dict) and isinstance(amount, int):
                 amount += len(self.visited_pages)
-        return
 
         with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
