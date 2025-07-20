@@ -1,4 +1,4 @@
-from model import SiglipStyleModel, ColSentenceModel
+from model import SiglipStyleModel, ColSentenceModel, MentorModel
 import os
 from transformers import Trainer, TrainingArguments
 from callbacks import NotebookProgressCallbackNoTable
@@ -6,6 +6,7 @@ from transformers.utils.notebook import NotebookProgressCallback
 from evaluation import compute_metrics
 import wandb
 from utils import get_train_and_test_data, collate_fn
+import itertools
 
 # loss = "siglip"
 loss = "clip"
@@ -14,7 +15,7 @@ batch_size = 128
 epochs = 10
 lr = 1e-6
 eval_batch = 250
-architecture = "Siglip"
+architecture = "ColSent"
 
 models = {
     "ColSent": ColSentenceModel,
