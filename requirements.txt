@@ -89,6 +89,7 @@ python-dateutil
 pytz
 # pywin32
 pyzmq
+readability-lxml
 regex
 requests
 requests-file
