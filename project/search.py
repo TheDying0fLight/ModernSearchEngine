@@ -50,7 +50,15 @@ class SearchEngine():
         nltk.download('stopwords')
         return set(stopwords.words('english'))
 
-    def retrieve(self, query: str):
+    def get_sentence_wise_similarities(self, query_embedding, relevant_urls):
+        similarities = {}
+        for url in relevant_urls:
+            doc_embedding = self.embedding_dict[url]
+            sentence_similarity = self.model.sentence_sim(query_embedding, doc_embedding.cuda()).squeeze()
+            similarities[url] = sentence_similarity.detach().cpu().tolist()
+        return similarities
+
+    def retrieve(self, query: str, max_res=100):
         similarities = []
         query_embedding = self.model.embed(query)
         for embedding, _ in tqdm(list(self.embedding_dict.items()), "Similarities"):
@@ -60,16 +68,18 @@ class SearchEngine():
         embeddings = np.array(list(self.embedding_dict.keys()))
         similarities = np.array(similarities)
         sorted_sim_index = np.argsort(-similarities)
-        return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index]
+        relevant_urls = urls[sorted_sim_index[:max_res]]
+        sentence_wise_similarities = self.get_sentence_wise_similarities(query_embedding, relevant_urls)
+        return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index], sentence_wise_similarities
 
     def search(self, query: str, max_res=100):
         filtered = [word for word in query.split() if word not in self.stop_words]
         filtered_query = ' '.join(filtered)
-        urls, embeddings, similarities = self.retrieve(filtered_query)
-        return [self.docs.documents[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res]
+        urls, embeddings, similarities, sentence_wise_similarities = self.retrieve(filtered_query, max_res=max_res)
+        return [self.docs.documents[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res], sentence_wise_similarities
 
     def search_and_cluster(self, query, max_res=100):
-        docs, embeddings, scores = self.search(query, max_res)
+        docs, embeddings, scores, sentence_wise_similarities = self.search(query, max_res)
         labels = AffinityPropagation().fit_predict(embeddings)
         num_topics = len(set(labels))
         topics = [[] for _ in range(num_topics)]
@@ -79,4 +89,4 @@ class SearchEngine():
             topic_scores[label].append(score)
         topic_max_scores = np.array([max(s) for s in topic_scores])
         sorted_topic_scores = np.argsort(-topic_max_scores)
-        return [topics[i] for i in sorted_topic_scores]
+        return [topics[i] for i in sorted_topic_scores], sentence_wise_similarities

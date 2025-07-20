@@ -23,6 +23,10 @@ class SiglipStyleModel(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1))
         self.to(device)
 
+    # dummy return to keep this model compatible with search.py, which calls sentence_sim
+    def sentence_sim(self, doc_tokens, query_tokens):
+        return torch.zeros((1,doc_tokens)).to(device)
+
     def tokenize(self, texts: str | list[str]):
         return self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt", max_length=512).to(device)
 
