@@ -8,20 +8,21 @@ import numpy as np
 from project import SiglipStyleModel, ColSentenceModel, DocumentCollection
 from sklearn.cluster import AffinityPropagation
 from bs4 import BeautifulSoup
+from typing import Dict, Set
 
 class SearchEngine():
     def __init__(self, data_folder="data", embedding_file:str="embeddings.pkl"):
-        self.embedding_dict = self._load_embeddings(path=os.path.join(data_folder, embedding_file))
-        self.docs = self._load_docs(path=data_folder)
+        self.embedding_dict: Dict[torch.Tensor, str] = self._load_embeddings(path=os.path.join(data_folder, embedding_file))
+        self.docs: DocumentCollection = self._load_docs(path=data_folder)
         # self._load_snippets(path=os.path.join(data_folder, HTML_FILE))
-        self.stop_words = self._load_stop_words()
+        self.stop_words: Set[str] = self._load_stop_words()
         # model = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
         self.model: SiglipStyleModel | ColSentenceModel = SiglipStyleModel().load(r"project/retriever/model_uploads/bert-mini_b32_marco_v1.safetensors")
 
     def _load_embeddings(self, path: str) -> dict[torch.Tensor, str]:
         return torch.load(path)
 
-    def _load_docs(self, path: str):
+    def _load_docs(self, path: str) -> DocumentCollection:
         if not os.path.exists(path):
             raise FileNotFoundError(f"DOC file not found at {path}")
 
@@ -45,7 +46,7 @@ class SearchEngine():
     #     return text.strip()[:max_char]
 
 
-    def _load_stop_words(self):
+    def _load_stop_words(self) -> Set[str]:
         nltk.download('stopwords')
         return set(stopwords.words('english'))
 
