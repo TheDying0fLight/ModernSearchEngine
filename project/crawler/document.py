@@ -211,7 +211,7 @@ class DocumentCollection:
         base = Path(dir_path)
         for pair in [
             (DOCS_FILE, self._add_doc),
-            (HTML_FILE, self._add_html) if load_html else (None, None)
+            (HTML_FILE, self._add_html) if load_html else None
         ]:
             if pair is None: continue
             fn, handler = pair
