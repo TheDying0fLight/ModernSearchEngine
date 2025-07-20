@@ -188,7 +188,7 @@ class Crawler:
             resp = request_fn(url, headers=self.get_random_headers(), timeout=TIMEOUT)
             if resp.status_code == 429:
                 with self.delay_lock:
-                    self.domain_delay[domain] = self.domain_delay.get("delay", DEFAULT_DELAY) + 1
+                    self.domain_delay[domain] = self.domain_delay.get(domain, DEFAULT_DELAY) + 1
                     delay = self.domain_delay[domain]
                 with self.frontier_lock: self.frontier.append(entry)
                 logging.warning(colored(f'429 Received: Delay increased to {delay}s for: {domain}', 'red'))
