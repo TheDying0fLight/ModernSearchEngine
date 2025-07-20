@@ -1,5 +1,5 @@
 import flet as ft
-from .components import LoadingIndicator, EmptyState, SearchBar
+from .components import LoadingIndicator, EmptyState, SearchBar, get_autocomplete_engine
 from .results_view import ResultsView, Result
 from.tab import Tab
 
@@ -9,11 +9,20 @@ class SearchTab(Tab):
     def __init__(self, page: ft.Page, on_favorite_toggle=None):
         self.page = page
         self.on_favorite_toggle = on_favorite_toggle
+        self.autocomplete_engine = get_autocomplete_engine()
 
         # Initialize components
         self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}'))
         self.loading_indicator = LoadingIndicator("Searching documents...")
         self.results_view = ResultsView(self.handle_favorite_toggle, self.handle_result_click)
+        
+        # Autocomplete status indicator
+        self.autocomplete_status = ft.Row([
+            ft.Icon(ft.Icons.SMART_TOY, color=ft.Colors.GREEN_500, size=16),
+            ft.Text("Smart suggestions ready", size=12, color=ft.Colors.GREEN_600)
+        ], alignment=ft.MainAxisAlignment.CENTER, spacing=5)
+        
+        # Create header with enhanced styling
         self.header = ft.Column([
                 ft.Text(
                     "🔍 Tübingen Search",
@@ -27,10 +36,14 @@ class SearchTab(Tab):
                     color=ft.Colors.GREY_600,
                     text_align=ft.TextAlign.CENTER
                 ),
+                ft.Container(height=10),  # Spacer
                 self.search_bar,
+                ft.Container(height=8),  # Spacer
+                self.autocomplete_status,
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True)
 
-        #self.advanced_options = AdvancedSearchOptions()
+        # Check autocomplete status
+        self._check_autocomplete_status()
 
         # Create the tab container
         super().__init__(
@@ -38,12 +51,41 @@ class SearchTab(Tab):
             icon=ft.Icons.SEARCH,
             controls=[
                 self.header,
-                #self.advanced_options,
                 self.loading_indicator,
                 self.results_view
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
+
+    def _check_autocomplete_status(self):
+        """Check autocomplete engine status and update indicator"""
+        if self.autocomplete_engine.is_ready():
+            self.autocomplete_status.controls[0].name = ft.Icons.SMART_TOY
+            self.autocomplete_status.controls[0].color = ft.Colors.GREEN_500
+            self.autocomplete_status.controls[1].value = "Smart suggestions ready"
+            self.autocomplete_status.controls[1].color = ft.Colors.GREEN_600
+        else:
+            self.autocomplete_status.controls[0].name = ft.Icons.HOURGLASS_EMPTY
+            self.autocomplete_status.controls[0].color = ft.Colors.ORANGE_500
+            self.autocomplete_status.controls[1].value = "Loading smart suggestions..."
+            self.autocomplete_status.controls[1].color = ft.Colors.ORANGE_600
+            # Check again in a bit
+            self._schedule_status_check()
+
+    def _schedule_status_check(self):
+        """Schedule another status check"""
+        import threading
+        import time
+        
+        def check_later():
+            time.sleep(2)
+            if hasattr(self, 'autocomplete_status'):
+                self._check_autocomplete_status()
+                if hasattr(self, 'autocomplete_status'):
+                    self.autocomplete_status.update()
+        
+        thread = threading.Thread(target=check_later, daemon=True)
+        thread.start()
 
     def handle_result_click(self, result_data: Result):
         """Handle result click"""

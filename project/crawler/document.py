@@ -209,19 +209,18 @@ class DocumentCollection:
 
     def load_from_file(self, dir_path: str, load_html: bool = False):
         base = Path(dir_path)
-        for fn, handler in [
+        for pair in [
             (DOCS_FILE, self._add_doc),
             (HTML_FILE, self._add_html) if load_html else (None, None)
         ]:
-            if fn is None: continue
+            if pair is None: continue
+            fn, handler = pair
             try:
-                lines = 0
                 for line in (base / fn).read_text(encoding="utf-8").splitlines():
                     if not (line := line.strip()): continue
                     data = json.loads(line)
                     handler(data)
-                    lines += 1
-                logging.info(f"Processed {fn}, Loaded {lines} lines of data, {len(self.documents)} documents.")
+                logging.info(f"Processed {fn}, Loaded {len(self.documents)} documents.")
             except FileNotFoundError:
                 logging.error(f"Missing file: {fn}")
             except Exception as e:
