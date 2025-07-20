@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List, Optional
 import flet as ft
 from .components import ResultContainer, EmptyState, ResultTitle
 from .tab import TabTitle
@@ -11,44 +12,7 @@ class Result:
     source: str
     date: str
     pages: str
-
-
-class ResultCard(ResultContainer):
-    """Individual result card component"""
-
-    def __init__(self, result_data: Result, on_click_callback=None, on_favorite_callback=None):
-        self.result_data = result_data
-        self.on_click_callback = on_click_callback
-        self.on_favorite_callback = on_favorite_callback
-        self.is_favorited = False
-        self.favorite_button = ft.IconButton(
-            icon=ft.Icons.BOOKMARK_BORDER if not self.is_favorited else ft.Icons.BOOKMARK,
-            icon_color=ft.Colors.GREY_600 if not self.is_favorited else ft.Colors.ORANGE_600,
-            tooltip="Add to favorites" if not self.is_favorited else "Remove from favorites",
-            on_click=self.toggle_favorite
-        )
-        super().__init__(
-            title=self.result_data.title,
-            text=self.result_data.snippet,
-            source=self.result_data.source,
-            metadata=[self.result_data.date, f"{self.result_data.pages} pages"],
-            button=self.favorite_button,
-            on_click=lambda e, result_data=result_data: on_click_callback(result_data),
-            width=300,
-            max_hight=300,
-        )
-
-    def toggle_favorite(self, e):
-        """Toggle favorite status"""
-        self.is_favorited = not self.is_favorited
-        # Update the icon
-        self.favorite_button.icon = ft.Icons.BOOKMARK if self.is_favorited else ft.Icons.BOOKMARK_BORDER
-        self.favorite_button.icon_color = ft.Colors.ORANGE_600 if self.is_favorited else ft.Colors.GREY_600
-        self.favorite_button.tooltip = "Remove from favorites" if self.is_favorited else "Add to favorites"
-        # Call callback if provided
-        if self.on_favorite_callback:
-            self.on_favorite_callback(self.result_data, self.is_favorited)
-        self.update()
+    example_sentence_scores: Optional[List[float]] = None  # Wichtigkeitswerte für dieses Result
 
 
 class ResultsView(ft.Container):
@@ -82,10 +46,20 @@ class ResultsView(ft.Container):
                     ft.Column([
                         ResultTitle(f"Results similar to '{result_row[0].title}'"),
                         ft.Row([
-                            ResultCard(
-                                result_data=result,
-                                on_click_callback=self.on_result_click,
-                                on_favorite_callback=self.on_favorite_toggle
+                            ResultContainer(
+                                title=result.title,
+                                text=result.snippet,
+                                source=result.source,
+                                metadata=[result.date, f"{result.pages} pages"],
+                                button=ft.IconButton(
+                                    icon=ft.Icons.BOOKMARK_BORDER,
+                                    icon_color=ft.Colors.GREY_600,
+                                    tooltip="Add to favorites",
+                                    on_click=lambda e, r=result: self.on_favorite_toggle(r, True) if self.on_favorite_toggle else None
+                                ),
+                                on_click=lambda e, r=result: self.on_result_click(r) if self.on_result_click else None,
+                                width=300,
+                                sentence_scores=result.example_sentence_scores
                             ) for result in result_row],
                             scroll=ft.ScrollMode.ALWAYS,
                             spacing=10,

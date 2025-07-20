@@ -142,6 +142,13 @@ MOCK_RESULTS =  [
         date = "15.11.2024",
         pages = "24",
         url = "https://de.wikipedia.org/wiki/Tübingen",
+        example_sentence_scores = [
+            0.0, 0.2, 0.3, 0.7, 0.0, 0.2, 0.3, 0.5, 1.0, 0.3,
+            0.1, 0.8, 0.4, 0.2, 0.9, 0.1, 0.6, 0.3, 0.7, 0.0,
+            0.5, 0.2, 0.8, 0.1, 0.4, 0.9, 0.3, 0.6, 0.0, 0.7,
+            0.2, 0.5, 0.1, 0.8, 0.3, 0.0, 0.6, 0.4, 0.9, 0.2,
+            0.7, 0.1, 0.5, 0.3, 0.8, 0.0, 0.4, 0.6, 0.2, 0.9
+        ],
     ),
     Result(
         title = "Tübingen University: A 500-Year Legacy",
@@ -150,6 +157,10 @@ MOCK_RESULTS =  [
         date = "03.09.2024",
         pages = "45",
         url = "https://de.wikipedia.org/wiki/Tübingen",
+        example_sentence_scores = [
+            0.5, 0.9, 0.7, 0.3, 0.8, 0.1, 0.6, 0.4, 0.2, 0.9,
+            0.3, 0.7, 0.0, 0.5, 0.8, 0.2, 0.6, 0.9, 0.1, 0.4
+        ],
     ),
     Result(
         title = "Traditional Swabian Cuisine and Local Beverages",
@@ -158,6 +169,10 @@ MOCK_RESULTS =  [
         date = "22.08.2024",
         pages = "18",
         url = "https://de.wikipedia.org/wiki/Tübingen",
+        example_sentence_scores = [
+            0.8, 0.2, 0.6, 0.9, 0.1, 0.4, 0.7, 0.3, 0.5, 0.8,
+            0.0, 0.6, 0.4, 0.9, 0.2, 0.7, 0.1, 0.5, 0.8, 0.3
+        ],
     ),
     Result(
         title = "Hohentübingen Castle: Fortress to Museum",
@@ -166,6 +181,10 @@ MOCK_RESULTS =  [
         date = "07.10.2024",
         pages = "31",
         url = "https://de.wikipedia.org/wiki/Tübingen",
+        example_sentence_scores = [
+            0.3, 0.8, 0.1, 0.6, 0.9, 0.2, 0.5, 0.7, 0.0, 0.4,
+            0.8, 0.3, 0.9, 0.1, 0.6, 0.4, 0.7, 0.2, 0.5, 0.8
+        ],
     ),
     Result(
         title = "The Neckar River and Tübingen's Waterfront",
@@ -174,6 +193,10 @@ MOCK_RESULTS =  [
         date = "12.07.2024",
         pages = "16",
         url = "https://de.wikipedia.org/wiki/Tübingen",
+        example_sentence_scores = [
+            0.6, 0.1, 0.8, 0.4, 0.2, 0.9, 0.3, 0.7, 0.5, 0.0,
+            0.8, 0.6, 0.2, 0.9, 0.1, 0.5, 0.7, 0.3, 0.4, 0.8
+        ],
     ),
     Result(
         title = "Festival Culture in Tübingen",
@@ -182,5 +205,9 @@ MOCK_RESULTS =  [
         date = "28.06.2024",
         pages = "22",
         url = "https://de.wikipedia.org/wiki/Tübingen",
+        example_sentence_scores = [
+            0.9, 0.3, 0.7, 0.1, 0.5, 0.8, 0.0, 0.4, 0.6, 0.9,
+            0.2, 0.7, 0.5, 0.3, 0.8, 0.1, 0.6, 0.4, 0.9, 0.0
+        ],
     ),
 ]
