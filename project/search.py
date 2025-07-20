@@ -6,7 +6,7 @@ from nltk.corpus import stopwords
 from tqdm import tqdm
 import numpy as np
 from project import SiglipStyleModel, ColSentenceModel, DOCS_FILE, HTML_FILE
-from sklearn.cluster import AffinityPropagation
+from sklearn.base import ClusterMixin
 from bs4 import BeautifulSoup
 
 class SearchEngine():
@@ -33,22 +33,6 @@ class SearchEngine():
                 docs[doc["url"]] = doc
         return docs
 
-    # def _load_snippets(self, path: str):
-    #     with open(path, 'r', encoding='utf-8') as f:
-    #         lines = f.readlines()
-    #         for line in tqdm(lines, "Line"):
-    #             doc: dict = json.loads(line.strip())
-    #             url, html = list(doc.items())[0]
-    #             if url in self.docs:
-    #                 self.docs[url]['snippet'] = self._preprocess_html(html)
-
-
-    # def _preprocess_html(self, html: str, seperator: str = '. ', max_char=100) -> str:
-    #     soup = BeautifulSoup(html, 'html.parser')
-    #     text = soup.get_text(separator=seperator, strip=True)
-    #     return text.strip()[:max_char]
-
-
     def _load_stop_words(self):
         nltk.download('stopwords')
         return set(stopwords.words('english'))
@@ -71,9 +55,9 @@ class SearchEngine():
         urls, embeddings, similarities = self.retrieve(filtered_query)
         return [self.docs[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res]
 
-    def search_and_cluster(self, query, max_res=100):
+    def search_and_cluster(self, query, clustering_alg: ClusterMixin, max_res=100):
         docs, embeddings, scores = self.search(query, max_res)
-        labels = AffinityPropagation().fit_predict(embeddings)
+        labels = clustering_alg.fit_predict(embeddings)
         num_topics = len(set(labels))
         topics = [[] for _ in range(num_topics)]
         topic_scores = [[] for _ in range(num_topics)]

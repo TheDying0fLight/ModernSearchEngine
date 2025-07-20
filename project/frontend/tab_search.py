@@ -6,7 +6,7 @@ from.tab import Tab
 class SearchTab(Tab):
     """Main search tab component containing search interface and results"""
 
-    def __init__(self, page: ft.Page, on_favorite_toggle=None):
+    def __init__(self, page: ft.Page, clustering_options: list[str], on_favorite_toggle=None):
         self.page = page
         self.on_favorite_toggle = on_favorite_toggle
 
@@ -14,21 +14,7 @@ class SearchTab(Tab):
         self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}'))
         self.loading_indicator = LoadingIndicator("Searching documents...")
         self.results_view = ResultsView(self.handle_favorite_toggle, self.handle_result_click)
-        self.header = ft.Column([
-                ft.Text(
-                    "🔍 Tübingen Search",
-                    size=32,
-                    weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.BLUE_800
-                ),
-                ft.Text(
-                    "Discover Tübingen's history, culture, and attractions",
-                    size=16,
-                    color=ft.Colors.GREY_600,
-                    text_align=ft.TextAlign.CENTER
-                ),
-                self.search_bar,
-            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True)
+        self.header = SearchHeader(self.search_bar, clustering_options)
 
         #self.advanced_options = AdvancedSearchOptions()
 
@@ -70,6 +56,37 @@ class SearchTab(Tab):
     def clear_results(self):
         """Clear current search results"""
         self.results_view.hide_results()
+
+class SearchHeader(ft.Row):
+    def __init__(self, search_bar: SearchBar, cluster_options = list[str]):
+        self.dropdown = ft.Dropdown(
+            value=cluster_options[0],
+            options=[ft.DropdownOption(s) for s in cluster_options], width=150)
+        super().__init__([
+            ft.Column([], width=200),
+            ft.Column([
+                ft.Text(
+                    "🔍 Tübingen Search",
+                    size=32,
+                    weight=ft.FontWeight.BOLD,
+                    color=ft.Colors.BLUE_800
+                ),
+                ft.Text(
+                    "Discover Tübingen's history, culture, and attractions",
+                    size=16,
+                    color=ft.Colors.GREY_600,
+                    text_align=ft.TextAlign.CENTER
+                ),
+                search_bar,
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True),
+            ft.Column(
+                [self.dropdown],
+                width=200,
+                alignment=ft.CrossAxisAlignment.END),
+            ], ft.CrossAxisAlignment.START)
+
+    def get_cluster_option(self):
+        return self.dropdown.value
 
 class AdvancedSearchOptions(ft.ExpansionTile):
     def __init__(self):

@@ -1,6 +1,7 @@
 import flet as ft
 from datetime import datetime
 import logging
+from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, KMeans
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
@@ -19,6 +20,11 @@ class SearchEnginePage:
         self.page.on_route_change = self.route_change
         self.is_searching = False
         self.current_results = []
+        self.possible_clustering_algos = {
+            'Affinity Propagation': AffinityPropagation(),
+            'Agglomerative Clustering': AgglomerativeClustering(),
+            'KMeans': KMeans()
+        }
 
         # Page setup with modern styling
         page.title = "Tübingen Search Engine"
@@ -31,7 +37,7 @@ class SearchEnginePage:
         # Initialize tab components
         self.help_tab = HelpTab()
         self.favorites_tab = FavoritesTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
-        self.search_tab = SearchTab(page=self.page, on_favorite_toggle=self.handle_favorite_toggle)
+        self.search_tab = SearchTab(page=self.page, clustering_options=list(self.possible_clustering_algos.keys()), on_favorite_toggle=self.handle_favorite_toggle)
         self.history_tab = HistoryTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
 
         # Build the layout
@@ -73,7 +79,8 @@ class SearchEnginePage:
 
     def search(self, query: str):
         """Enhanced search function with loading state"""
-        results = self.search_engine.search_and_cluster(query)
+        clustering_algo = self.possible_clustering_algos[self.search_tab.header.get_cluster_option()]
+        results = self.search_engine.search_and_cluster(query, clustering_algo)
         results = [[self.convert_doc(res) for res in topic] for topic in results]
 
         self.search_tab.display_results(query, results)
