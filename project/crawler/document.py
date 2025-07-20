@@ -87,8 +87,8 @@ class Document:
         soup = self.get_soup()
         readable_doc = ReadabilityDocument(self.html)
 
-        text = readable_doc.content if readable_doc else soup.get_text(separator=' ', strip=True)
-        self.title = readable_doc.short_title() if readable_doc.short_title() else ""
+        text = readable_doc.content if readable_doc and readable_doc.content else soup.get_text(separator=' ', strip=True)
+        self.title = readable_doc.short_title() if readable_doc and readable_doc.short_title() else ""
         self.word_count = len(text.split())
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
         self.paragraph_count = self.html.count('<p>')
@@ -138,6 +138,8 @@ class Document:
         if not text:  # if still no text, extract from whole text
             words = soup.get_text(separator=' ', strip=True).split()
             text = " ".join(words[:max_length])
+        if not text:    # if still no text, return a default message
+            return "No description available"
         return text
 
     def is_duplicate(self, other: 'Document') -> bool:
