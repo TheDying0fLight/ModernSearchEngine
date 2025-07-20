@@ -4,9 +4,10 @@ import json
 from tqdm import tqdm
 import numpy as np
 from project import SiglipStyleModel, ColSentenceModel, DOCS_FILE
+from sklearn.cluster import AffinityPropagation
 
 class SearchEngine():
-    def __init__(self, data_folder="../data", embedding_file:str="embeddings.pkl"):
+    def __init__(self, data_folder="data", embedding_file:str="embeddings.pkl"):
         self.embedding_dict = self._load_embeddings(path=os.path.join(data_folder, embedding_file))
         self.docs = self._load_docs(path=os.path.join(data_folder, DOCS_FILE))
         # model = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
@@ -33,9 +34,25 @@ class SearchEngine():
         for embedding, _ in tqdm(list(self.embedding_dict.items()), "Similarities"):
             similarity = self.model.resolve(query_embedding, embedding.cuda()).squeeze()
             similarities.append(similarity.detach().cpu())
-        vals = np.array(list(zip(self.embedding_dict.values(), similarities)))
-        return vals[np.argsort(similarities)[::-1]]
+        urls = np.array(list(self.embedding_dict.values()))
+        embeddings = np.array(list(self.embedding_dict.keys()))
+        similarities = np.array(similarities)
+        sorted_sim_index = np.argsort(-similarities)
+        return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index]
 
     def search(self, query, max_res=100):
-        res = self.retrieve(query)[:max_res]
-        return [self.docs[r[0]] for r in res]
+        urls, embeddings, similarities = self.retrieve(query)
+        return [self.docs[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res]
+
+    def search_and_cluster(self, query, max_res=100):
+        docs, embeddings, scores = self.search(query, max_res)
+        labels = AffinityPropagation().fit_predict(embeddings)
+        num_topics = len(set(labels))
+        topics = [[] for _ in range(num_topics)]
+        topic_scores = [[] for _ in range(num_topics)]
+        for doc, score, label in zip(docs, scores, labels):
+            topics[label].append(doc)
+            topic_scores[label].append(score)
+        topic_max_scores = np.array([max(s) for s in topic_scores])
+        sorted_topic_scores = np.argsort(-topic_max_scores)
+        return [topics[i] for i in sorted_topic_scores]
