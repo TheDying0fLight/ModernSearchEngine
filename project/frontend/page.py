@@ -2,6 +2,7 @@ import flet as ft
 from datetime import datetime
 import logging
 from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, KMeans
+import urllib.parse
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
@@ -63,9 +64,9 @@ class SearchEnginePage:
     def route_change(self, route):
         template_route = ft.TemplateRoute(self.page.route)
         if template_route.match('/search?:q&:c'):
-            query = template_route.q.split('=')[1]
-            cluster_option = template_route.c.split('=')[1]
-            if not query.strip():
+            query = urllib.parse.unquote_plus(template_route.q.split('=')[1])
+            cluster_option = urllib.parse.unquote_plus(template_route.c.split('=')[1])
+            if not query.strip() or cluster_option not in self.possible_clustering_algos:
                 self.page.go('/')
                 return
             self.navigate_to_search_tab()
