@@ -390,7 +390,7 @@ class Crawler:
                 logging.warning(f"Failed to load previous state: {e}. Starting fresh crawl.")
 
             try:
-                self.doc_collection.load_from_file(self.doc_collection_path)
+                self.doc_collection.load_from_file(self.path)
                 self.add_stale_docs_to_frontier()
             except Exception as e:
                 logging.warning(f"Failed to load document collection: {e}. Starting fresh crawl.")
@@ -399,6 +399,7 @@ class Crawler:
             print(self.get_crawling_stats())
             if isinstance(self.visited_pages, dict) and isinstance(amount, int):
                 amount += len(self.visited_pages)
+        return
 
         with TrackingThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = set()
@@ -475,8 +476,8 @@ class Crawler:
         """Save the current frontier and visited pages to a file."""
         with self.visited_lock, self.frontier_lock:
             state = {
-                "visited_pages": list(self.visited_pages),
-                "frontier": list(self.frontier),
+                "visited_pages": self.visited_pages.copy(),
+                "frontier": self.frontier.copy(),
             }
         with self.write_lock:
             with open(self.state_path, 'w') as f: json.dump(state, f)
