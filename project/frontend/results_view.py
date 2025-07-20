@@ -10,7 +10,7 @@ class Result:
     snippet: str
     source: str
     date: str
-    pages: str
+    words: str
 
 
 class ResultCard(ResultContainer):
@@ -31,7 +31,7 @@ class ResultCard(ResultContainer):
             title=self.result_data.title,
             text=self.result_data.snippet,
             source=self.result_data.source,
-            metadata=[self.result_data.date, f"{self.result_data.pages} pages"],
+            metadata=[self.result_data.date, f"{self.result_data.words} words"],
             button=self.favorite_button,
             on_click=lambda e, result_data=result_data: on_click_callback(result_data),
             width=300,
