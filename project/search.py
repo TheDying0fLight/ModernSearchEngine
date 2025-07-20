@@ -16,8 +16,8 @@ class SearchEngine():
         self.docs: DocumentCollection = self._load_docs(path=data_folder)
         # self._load_snippets(path=os.path.join(data_folder, HTML_FILE))
         self.stop_words: Set[str] = self._load_stop_words()
-        # model = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
-        self.model: SiglipStyleModel | ColSentenceModel = SiglipStyleModel().load(r"project/retriever/model_uploads/bert-mini_b32_marco_v1.safetensors")
+        self.model = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
+        #self.model: SiglipStyleModel | ColSentenceModel = SiglipStyleModel().load(r"project/retriever/model_uploads/bert-mini_b32_marco_v1.safetensors")
 
     def _load_embeddings(self, path: str) -> dict[torch.Tensor, str]:
         return torch.load(path)
@@ -37,7 +37,7 @@ class SearchEngine():
     def get_sentence_wise_similarities(self, query_embedding, relevant):
         similarities = {}
         for url, embedding in relevant:
-            sentence_similarity = self.model.sentence_sim(query_embedding, embedding.cuda()).squeeze()
+            sentence_similarity = self.model.sentence_sim(query_embedding, torch.tensor(embedding).cuda()).squeeze()
             similarities[url] = sentence_similarity.detach().cpu().tolist()
         return similarities
 
@@ -56,8 +56,8 @@ class SearchEngine():
     def search(self, query: str, max_res=100):
         filtered = [word for word in query.split() if word not in self.stop_words]
         filtered_query = ' '.join(filtered)
-        urls, embeddings, similarities, query_embedding = self.retrieve(filtered_query, max_res=max_res)
-        sentence_wise_similarities = self.get_sentence_wise_similarities(query_embedding, zip(embeddings[:max_res], urls[:max_res]))
+        urls, embeddings, similarities, query_embedding = self.retrieve(filtered_query)
+        sentence_wise_similarities = self.get_sentence_wise_similarities(query_embedding, zip(urls[:max_res], embeddings[:max_res]))
         return [self.docs.documents[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res], sentence_wise_similarities
 
     def search_and_cluster(self, query, clustering_alg: ClusterMixin, max_res=100):

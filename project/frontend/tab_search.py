@@ -24,7 +24,7 @@ class SearchTab(Tab):
         self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}&c={self.header.get_cluster_option()}'))
         self.loading_indicator = LoadingIndicator("Searching documents...")
         self.results_view = ResultsView(self.handle_favorite_toggle, self.handle_result_click)
-        self.header = SearchHeader(self.page, self.search_bar, clustering_options)
+        self.header = SearchHeader(self.page, self.search_bar, self.autocomplete_status, clustering_options)
 
         # Check autocomplete status
         self._check_autocomplete_status()
