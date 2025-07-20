@@ -12,7 +12,7 @@ class Result:
     source: str
     date: str
     pages: str
-    example_sentence_scores: Optional[List[float]] = None  # Wichtigkeitswerte für dieses Result
+    example_sentence_scores: Optional[List[float]] = None  
 
 
 class ResultsView(ft.Container):

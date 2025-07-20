@@ -16,7 +16,6 @@ class ResultContainer(ft.Container):
     """Individual result card component"""
 
     def __init__(self, title: str, text: str, source: str, metadata: list[str], button: ft.Button, on_click, width=None, max_hight=None, sentence_scores: Optional[List[float]] = None):
-        # Metadaten immer untereinander (Column)
         metadata_control = ft.Column([ft.Text(source, color=ft.Colors.GREEN_600, size=12, weight=ft.FontWeight.BOLD)], spacing=5)
         for md in metadata:
             metadata_control.controls.append(ft.Text(md, color=ft.Colors.GREY_600, size=12))
