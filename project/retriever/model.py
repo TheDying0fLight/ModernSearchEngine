@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional as F
 from transformers import AutoTokenizer, AutoModel
 from safetensors.torch import load_file
 from transformers.models.clip.modeling_clip import clip_loss
@@ -93,6 +93,9 @@ class ColSentenceModel(nn.Module):
     def max_sim(self, doc_tokens, query_tokens):
         query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
         # shape after bmm (batch size, #doc_tokens, #query_tokens)
+        print(f"# query_embedding: {query_tokens.shape}")
+        print(f"# doc_embedding: {doc_tokens.shape}")
+        print(f"# result_embedding: {torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2).reshape((desired_query_shape[0], desired_query_shape[1])).shape}")
         return torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
 
     def avg_sim(self, doc_tokens, query_tokens):
