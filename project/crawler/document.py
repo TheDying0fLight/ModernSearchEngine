@@ -1,3 +1,4 @@
+from readability import Document as ReadabilityDocument
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from urllib.parse import urlparse
@@ -84,8 +85,10 @@ class Document:
 
     def update_metrics(self, crawl: bool = True):
         soup = self.get_soup()
-        text = soup.get_text(separator=' ', strip=True)
-        self.title = soup.title.string if soup.title and soup.title.string else ""
+        readable_doc = ReadabilityDocument(self.html)
+
+        text = readable_doc.content if readable_doc and readable_doc.content else soup.get_text(separator=' ', strip=True)
+        self.title = readable_doc.short_title() if readable_doc and readable_doc.short_title() else ""
         self.word_count = len(text.split())
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
         self.paragraph_count = self.html.count('<p>')
@@ -93,13 +96,16 @@ class Document:
             self.last_crawl_timestamp = time.time()
             self.crawl_frequency += 1
 
-        description = soup.find("meta", property="og:description")
+        description = self.extract_description(soup, readable_doc)
         site_type = soup.find("meta", property="og:type")
-        if site_type and site_type["content"] == "article":
-            author = soup.find("meta", name="article:author")
+        for attr in ["author", "article:author"]:
+            meta = soup.find("meta", attrs={"name": attr}) or soup.find("meta", attrs={"property": attr})
+            if meta:
+                author = meta.get("content")
+                break
 
         self.description = description["content"] if description else "No meta description given"
-        self.author = author["content"] if author else "No author available"
+        self.author = author if author else "No author available"
         self.site_type = site_type["content"] if site_type else "No type available"
 
         keyword_count = sum(1 for kw in self.relevant_keywords if re.search(kw, self.url, re.IGNORECASE))
@@ -108,6 +114,33 @@ class Document:
             self.relevance_score -= 10
         else:
             self.relevance_score += keyword_count
+
+    def extract_description(self, soup: BeautifulSoup, readable_doc: ReadabilityDocument, max_length=100) -> str:
+        """Extract a summary description from the HTML soup."""
+        summary_html = readable_doc.summary(html_partial=True) if readable_doc else None
+        if summary_html:
+            summary_soup = BeautifulSoup(summary_html, 'lxml')
+            text = summary_soup.get_text(separator=' ', strip=True)
+        if text: return text[:max_length]
+
+        description = soup.find("meta", attrs={"name": "description"})  # if no summary, try to get description from meta tags
+        if not description: description = soup.find("meta", attrs={"property": "og:description"})
+        
+        if description and description.get("content"):
+            text = description["content"]
+        else:  # if no meta description, try to extract from paragraphs
+            for tag in soup(["script", "style", "head", "footer", "nav"]):
+                tag.decompose()
+            p = soup.find("p")
+            if p:
+                words = p.get_text(separator=" ", strip=True).split()
+                text = " ".join(words[:max_length])
+        if not text:  # if still no text, extract from whole text
+            words = soup.get_text(separator=' ', strip=True).split()
+            text = " ".join(words[:max_length])
+        if not text:    # if still no text, return a default message
+            return "No description available"
+        return text
 
     def is_duplicate(self, other: 'Document') -> bool:
         if not self.content_hash or not other.content_hash:
