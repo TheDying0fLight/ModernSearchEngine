@@ -83,7 +83,7 @@ class SearchEnginePage:
     def search(self, query: str, cluster_option: str):
         """Enhanced search function with loading state"""
         clustering_algo = self.possible_clustering_algos[cluster_option]
-        results = self.search_engine.search_and_cluster(query, clustering_algo)
+        results, sentence_wise_similarities = self.search_engine.search_and_cluster(query, clustering_algo)
         results = [[self.convert_doc(res) for res in topic] for topic in results]
 
         self.search_tab.display_results(query, results)

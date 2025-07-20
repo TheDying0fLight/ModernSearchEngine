@@ -48,7 +48,7 @@ class SearchEngine():
             similarity = self.model.resolve(query_embedding, embedding.cuda()).squeeze()
             similarities.append(similarity.detach().cpu())
         urls = np.array(list(self.embedding_dict.values()))
-        embeddings = np.array(list(self.embedding_dict.keys()))
+        embeddings = np.array([torch.mean(e, axis=0) for e in self.embedding_dict.keys()])
         similarities = np.array(similarities)
         sorted_sim_index = np.argsort(-similarities)
         return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index], query_embedding
