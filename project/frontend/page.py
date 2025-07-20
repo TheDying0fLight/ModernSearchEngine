@@ -98,7 +98,7 @@ class SearchEnginePage:
         return Result(
             url=doc['url'],
             title=doc['title'],
-            snippet='...',
+            snippet='...', #doc['snippet'],
             source=doc['domain'],
             date=datetime.fromtimestamp(doc['last_crawl_timestamp']),
             words=doc['word_count']
