@@ -14,11 +14,11 @@ class SearchEngine():
     def __init__(self, data_folder="data", embedding_file:str="embeddings.pkl", cluster_embedding_file:str="clustering_embeddings.pkl"):
         self.embedding_dict: Dict[torch.Tensor, str] = self._load_embeddings(path=os.path.join(data_folder, embedding_file))
         cluster_embedding_dict: Dict[str, torch.Tensor] = self._load_embeddings(path=os.path.join(data_folder, cluster_embedding_file))
-        self.cluster_embeddings = []
-        for key in self.embedding_dict.keys():
-            url = self.embedding_dict[key]
-            self.cluster_embeddings.append(cluster_embedding_dict[url])
-        self.cluster_embeddings = np.array(self.cluster_embeddings)
+        #self.cluster_embeddings = []
+        #for key in self.embedding_dict.keys():
+        #    url = self.embedding_dict[key]
+        #    self.cluster_embeddings.append(cluster_embedding_dict[url])
+        #self.cluster_embeddings = np.array(self.cluster_embeddings)
         self.docs: DocumentCollection = self._load_docs(path=data_folder)
         # self._load_snippets(path=os.path.join(data_folder, HTML_FILE))
         self.stop_words: Set[str] = self._load_stop_words()
@@ -54,10 +54,10 @@ class SearchEngine():
             similarity = self.model.resolve(query_embedding, embedding.cuda()).squeeze()
             similarities.append(similarity.detach().cpu())
         urls = np.array(list(self.embedding_dict.values()))
-        print(list(map(lambda x: x.shape, self.embedding_dict.keys())))
+        embeddings = np.array([torch.mean(e, axis=0) for e in self.embedding_dict.keys()])
         similarities = np.array(similarities)
         sorted_sim_index = np.argsort(-similarities)
-        return urls[sorted_sim_index], self.cluster_embeddings[sorted_sim_index], similarities[sorted_sim_index], query_embedding
+        return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index], query_embedding
 
     def search(self, query: str, max_res=100):
         filtered = [word for word in query.split() if word not in self.stop_words]

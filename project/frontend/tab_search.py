@@ -99,7 +99,8 @@ class SearchHeader(ft.Row):
         self.dropdown = ft.Dropdown(
             value=cluster_options[0],
             options=[ft.DropdownOption(s) for s in cluster_options], width=self.side_width,
-            color=ft.Colors.GREY_600,
+            border_color=ft.Colors.GREY_400,
+            text_style=ft.TextStyle(size=14, color=ft.Colors.GREY_600),
             on_change=lambda e: self.on_cluster_option_change()
         )
 
@@ -122,11 +123,11 @@ class SearchHeader(ft.Row):
                 autocomplete_status
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True),
             ft.Column(
-                [self.dropdown],
+                [ft.Text('Choose Clustering Algorithm', size=14, color=ft.Colors.GREY_600), self.dropdown],
                 width=self.side_width,
                 alignment=ft.MainAxisAlignment.START,
-                horizontal_alignment=ft.CrossAxisAlignment.END),
-            ], ft.CrossAxisAlignment.START, spacing=0)
+                horizontal_alignment=ft.CrossAxisAlignment.START),
+            ], vertical_alignment=ft.CrossAxisAlignment.START, spacing=0)
 
     def get_cluster_option(self):
         return self.dropdown.value
@@ -135,41 +136,3 @@ class SearchHeader(ft.Row):
         pattern = r'(search\?q=.*&c=)(.*)'
         new_route = re.sub(pattern, lambda m: m.group(1) + self.get_cluster_option(), self.page.route)
         self.page.go(new_route)
-
-class AdvancedSearchOptions(ft.ExpansionTile):
-    def __init__(self):
-        super().__init__(
-            title=ft.Text("Advanced Search Options"),
-            subtitle=ft.Text("Filters and settings"),
-            collapsed_text_color=ft.Colors.BLUE_600,
-            text_color=ft.Colors.BLUE_800,
-            controls=[
-                ft.Container(
-                    content=ft.Column([
-                        ft.Row([
-                            ft.Checkbox(label="Search titles only", value=False),
-                            ft.Checkbox(label="Exact phrase search", value=False)
-                        ]),
-                        ft.Row([
-                            ft.Checkbox(label="Include historical documents", value=True),
-                            ft.Checkbox(label="Include recent articles", value=True)
-                        ]),
-                        ft.Divider(),
-                        ft.Row([
-                            ft.Text("Document type:", size=14, color=ft.Colors.GREY_700),
-                            ft.Dropdown(
-                                width=150,
-                                value="all",
-                                options=[
-                                    ft.dropdown.Option("all", "All types"),
-                                    ft.dropdown.Option("articles", "Articles"),
-                                    ft.dropdown.Option("guides", "Guides"),
-                                    ft.dropdown.Option("historical", "Historical")
-                                ]
-                            )
-                        ], spacing=10)
-                    ], spacing=10),
-                    padding=10
-                )
-            ]
-        )
