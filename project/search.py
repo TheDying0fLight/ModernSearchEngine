@@ -5,14 +5,14 @@ import nltk
 from nltk.corpus import stopwords
 from tqdm import tqdm
 import numpy as np
-from project import SiglipStyleModel, ColSentenceModel, DOCS_FILE, HTML_FILE
+from project import SiglipStyleModel, ColSentenceModel, DocumentCollection
 from sklearn.cluster import AffinityPropagation
 from bs4 import BeautifulSoup
 
 class SearchEngine():
     def __init__(self, data_folder="data", embedding_file:str="embeddings.pkl"):
         self.embedding_dict = self._load_embeddings(path=os.path.join(data_folder, embedding_file))
-        self.docs = self._load_docs(path=os.path.join(data_folder, DOCS_FILE))
+        self.docs = self._load_docs(path=data_folder)
         # self._load_snippets(path=os.path.join(data_folder, HTML_FILE))
         self.stop_words = self._load_stop_words()
         # model = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
@@ -25,12 +25,8 @@ class SearchEngine():
         if not os.path.exists(path):
             raise FileNotFoundError(f"DOC file not found at {path}")
 
-        docs = {}
-        with open(path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            for line in tqdm(lines, "Line"):
-                doc = json.loads(line.strip())
-                docs[doc["url"]] = doc
+        docs = DocumentCollection()
+        docs.load_from_file(dir_path=path, load_html=False)
         return docs
 
     # def _load_snippets(self, path: str):
@@ -69,7 +65,7 @@ class SearchEngine():
         filtered = [word for word in query.split() if word not in self.stop_words]
         filtered_query = ' '.join(filtered)
         urls, embeddings, similarities = self.retrieve(filtered_query)
-        return [self.docs[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res]
+        return [self.docs.documents[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res]
 
     def search_and_cluster(self, query, max_res=100):
         docs, embeddings, scores = self.search(query, max_res)

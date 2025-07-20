@@ -82,15 +82,16 @@ class Document:
             self.update_metrics()
             self.content_hash = hashlib.md5(self.get_content().encode()).hexdigest()
 
-    def update_metrics(self):
+    def update_metrics(self, crawl: bool = True):
         soup = self.get_soup()
         text = soup.get_text(separator=' ', strip=True)
         self.title = soup.title.string if soup.title and soup.title.string else ""
         self.word_count = len(text.split())
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
         self.paragraph_count = self.html.count('<p>')
-        self.last_crawl_timestamp = time.time()
-        self.crawl_frequency += 1
+        if crawl:
+            self.last_crawl_timestamp = time.time()
+            self.crawl_frequency += 1
 
         description = soup.find("meta", property="og:description")
         site_type = soup.find("meta", property="og:type")
@@ -210,7 +211,7 @@ class DocumentCollection:
         base = Path(dir_path)
         for fn, handler in [
             (DOCS_FILE, self._add_doc),
-            (HTML_FILE, self._add_html) if load_html else None
+            (HTML_FILE, self._add_html) if load_html else (None, None)
         ]:
             if fn is None: continue
             try:
@@ -230,16 +231,13 @@ class DocumentCollection:
         doc = Document(url="")
         doc.load_from_dict(d)
         if doc.url:
-            print(doc.url)
             self.documents[doc.url] = doc
         else:
             logging.warning("Skipped doc without URL: %r", d)
 
     def _add_html(self, h):
         url, html = h.get("url"), h.get("html")
-        print(url)
         if url in self.documents and html:
-            print(len(html))
             self.documents[url].html = html
 
     def get_document(self, url: str) -> Optional[Document]:
