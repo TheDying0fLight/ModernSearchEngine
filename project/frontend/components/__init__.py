@@ -8,4 +8,4 @@ from .empty_state import EmptyState
 from .result_container import ResultContainer, ResultTitle
 from .search_bar import SearchBar
 from .autocomplete_engine import AutocompleteEngine, get_autocomplete_engine
-from .sentence_heatmap import SentenceImportanceHeatmap, CompactSentenceHeatmap, HorizontalSentenceHeatmap
+from .sentence_heatmap import HorizontalSentenceHeatmap
