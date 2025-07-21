@@ -44,13 +44,14 @@ default_user_agents = [
 PARSER = "lxml"
 DEFAULT_DELAY = 1
 TIMEOUT = 5
+LOGGING_DELAY = 2
 STATE_FILE = "crawler_state.json"
 
 class Crawler:
     def __init__(self,
                  seed: list[str],
                  max_workers: int = multiprocessing.cpu_count() // 2,
-                 keywords: list = [r't\S{1,6}bingen', 'neckar island'],
+                 keywords: list = [r't[^h-]{1,6}bingen', 'neckar island'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = False,
                  auto_resume: bool = False,
@@ -306,8 +307,7 @@ class Crawler:
         logging.debug(f"[Thread {thread_id}]: Relevance score for {url}: {score}")
         return score
 
-    def is_english(self, soup: BeautifulSoup):
-        text = soup.get_text(separator=' ')
+    def is_english(self, text: str):
         try:
             lang = detect(text)
             return lang == 'en'
@@ -336,10 +336,11 @@ class Crawler:
                 raise Exception(f"Page to large, Bytes: {len(html.encode())}, {url}")
 
             soup = BeautifulSoup(html, PARSER)
-            english |= self.is_english(soup)
+            soup_text = soup.get_text(separator=' ').lower()
+            english |= self.is_english(soup_text)
             if not english: raise BrokenPipeError("Url not detected as English.")
 
-            keywords_found = any(regex.search(html.lower()) for regex in self.keywords)
+            keywords_found = any(regex.search(soup_text.lower()) for regex in self.keywords)
             if not keywords_found: raise BrokenPipeError("No keywords found.")
 
             doc = self.doc_collection.get_document(url)
@@ -389,7 +390,7 @@ class Crawler:
                 logging.warning(f"Failed to load document collection: {e}. Starting fresh crawl.")
                 self.doc_collection = DocumentCollection()
 
-            print(self.get_crawling_stats())
+            logging.info(self.get_crawling_stats())
             if isinstance(self.visited_pages, dict) and isinstance(amount, int):
                 amount += len(self.visited_pages)
 
@@ -412,11 +413,11 @@ class Crawler:
 
                     post_time = time.time()
                     diff = post_time - prior_time
-                    if diff < 2: time.sleep(2 - diff)
+                    if diff < LOGGING_DELAY: time.sleep(LOGGING_DELAY - diff)
                     update_futures()
             finally:
                 while futures:
-                    time.sleep(2)
+                    time.sleep(LOGGING_DELAY)
                     update_futures()
                 self.cleanup_and_shutdown()
 
