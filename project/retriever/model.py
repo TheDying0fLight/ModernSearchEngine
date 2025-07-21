@@ -9,7 +9,7 @@ import math
 import numpy as np
 import re
 from sentence_transformers import SentenceTransformer
-import tqdm
+from tqdm import tqdm 
 from bs4 import BeautifulSoup
 import json
 
@@ -201,7 +201,7 @@ class BM25():
         self.b = b
         self.k = k
 
-    def preprocess_html(html: str, seperator: str = ' ') -> str:
+    def preprocess_html(self, html: str, seperator: str = ' ') -> str:
         soup = BeautifulSoup(html, 'html.parser')
         text = soup.get_text(separator=seperator, strip=True)
         return text.strip()
@@ -223,7 +223,7 @@ class BM25():
         word_bags = {}
         doc_lengths = {}
         doc_freqs = {}
-        for url in documents.keys():
+        for url in tqdm(documents.keys(), "preprocessing"):
             document = self.preprocess_html(documents[url])
             words = nltk.tokenize.word_tokenize(document)
             words = [re.sub(r'[^\w\s]', '', word)
@@ -233,7 +233,7 @@ class BM25():
             word_bags[url] = word_bag
         idfs = self.calc_idf(doc_freqs, len(doc_lengths))
         if len(doc_lengths) > 0:
-            avgdl = sum(doc_lengths) / len(doc_lengths)
+            avgdl = sum(doc_lengths.values()) / len(doc_lengths.values())
         else:
             avgdl = 0
         return word_bags, idfs, avgdl, doc_lengths
