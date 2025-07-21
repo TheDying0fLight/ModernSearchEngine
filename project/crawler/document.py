@@ -2,7 +2,7 @@ from readability import Document as ReadabilityDocument
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, element
 from pathlib import Path
 from collections import defaultdict
 import logging
@@ -17,9 +17,6 @@ DOCS_FILE = "indexed_docs.jsonl"
 
 @dataclass
 class Document:
-    DEFAULT_KEYWORDS = (r't\S+bingen', 'eberhard karl', 'palmer', 'lustnau',
-                        r's\S+dstadt', 'neckarinsel', 'stocherkahn', 'bebenhausen')
-
     url: str
     title: str = ""
     author: str = ""
@@ -28,7 +25,7 @@ class Document:
 
     content_hash: str = field(default="", init=False)
     html: str = ""
-    
+
     word_count: int = 0
     sentence_count: int = 0
     paragraph_count: int = 0
@@ -44,7 +41,7 @@ class Document:
 
     embedding = None  # Placeholder for embedding, can be set later
 
-    relevant_keywords: tuple = field(default=DEFAULT_KEYWORDS)
+    relevant_keywords: list = field(default=[])
     relevance_score: int = 0
 
     last_crawl_timestamp: float = field(default_factory=time.time)
@@ -87,7 +84,7 @@ class Document:
         soup = self.get_soup()
         readable_doc = ReadabilityDocument(self.html)
 
-        text = readable_doc.content if readable_doc and readable_doc.content else soup.get_text(separator=' ', strip=True)
+        text = readable_doc.content() if readable_doc and readable_doc.content() else soup.get_text(separator=' ', strip=True)
         self.title = readable_doc.short_title() if readable_doc and readable_doc.short_title() else ""
         self.word_count = len(text.split())
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
@@ -97,16 +94,31 @@ class Document:
             self.crawl_frequency += 1
 
         description = self.extract_description(soup, readable_doc)
-        site_type = soup.find("meta", property="og:type")
-        for attr in ["author", "article:author"]:
-            meta = soup.find("meta", attrs={"name": attr}) or soup.find("meta", attrs={"property": attr})
-            if meta:
-                author = meta.get("content")
-                break
 
-        self.description = description["content"] if description else "No meta description given"
-        self.author = author if author else "No author available"
-        self.site_type = site_type["content"] if site_type else "No type available"
+        site_type = soup.find("meta", property="og:type")
+        if isinstance(site_type, element.Tag):
+            site_type = site_type.get("content")
+        elif isinstance(site_type, element.NavigableString):
+            site_type = str(site_type).strip()
+        
+        author = None
+        for attr in ["author", "article:author"]:
+            meta_author = soup.find("meta", attrs={"name": attr}) or soup.find("meta", attrs={"property": attr})
+            if isinstance(meta_author, element.Tag):
+                author = meta_author.get("content")
+                break
+            elif isinstance(meta_author, element.NavigableString):
+                author = str(meta_author).strip()
+                break
+        if not author:
+            author = "No author available"
+
+        self.description = description if description else "No description available"
+        self.site_type = site_type if site_type else "No type available"
+        if isinstance(author, str):
+            self.author = author
+        else:
+            self.author = "No author available"
 
         keyword_count = sum(1 for kw in self.relevant_keywords if re.search(kw, self.url, re.IGNORECASE))
 
@@ -127,7 +139,10 @@ class Document:
         if not description: description = soup.find("meta", attrs={"property": "og:description"})
         
         if description and description.get("content"):
-            text = description["content"]
+            if isinstance(description, str):
+                text = description
+            else:
+                text = description["content"]
         else:  # if no meta description, try to extract from paragraphs
             for tag in soup(["script", "style", "head", "footer", "nav"]):
                 tag.decompose()
@@ -161,7 +176,7 @@ class Document:
             f.write(json.dumps(self.info_to_dict()) + "\n")
         html_path = os.path.join(path, HTML_FILE)
         with open(html_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"html": self.html}) + "\n")
+            f.write(json.dumps({self.url: self.html}) + "\n")
 
     def load_from_dict(self, data: Dict):
         for key, value in data.items():
@@ -197,7 +212,7 @@ class Document:
 
 class DocumentCollection:
     def __init__(self):
-        self.documents: Dict[str, Document] = {}
+        self.documents: Dict[str, Document] = defaultdict(Document)
         self.content_hashes: Dict[str, str] = {}
         self.domain_documents: Dict[str, List[str]] = defaultdict(list)
 
@@ -229,16 +244,13 @@ class DocumentCollection:
     def write_collection_to_file(self, path: str = "data"):
         """ Save the document collection to two files in JSONL format, one document per line."""
         info_path = os.path.join(path, DOCS_FILE)
-        with open(info_path, 'w', encoding='utf-8') as f:
-            for _, doc in self.documents.items():
-                f.write(json.dumps(doc.info_to_dict()) + "\n")
-        logging.info(f"Saved {len(self.documents)} documents to {info_path}")
-
         html_path = os.path.join(path, HTML_FILE)
-        with open(html_path, 'w', encoding='utf-8') as f:
-            for _, doc in self.documents.items():
-                f.write(json.dumps({"url": doc.url, "html": doc.html}) + "\n")
-        logging.info(f"Saved {len(self.documents)} documents to {html_path}")
+        with open(info_path, 'w', encoding='utf-8') as docs:
+            with open(html_path, 'w', encoding='utf-8') as html:
+                for _, doc in self.documents.items():
+                    html.write(json.dumps({doc.url: doc.html}) + "\n")
+                    docs.write(json.dumps(doc.info_to_dict()) + "\n")
+            logging.info(f"Saved {len(self.documents)} documents to {info_path} and {html_path}")
 
     def load_from_file(self, dir_path: str, load_html: bool = False):
         base = Path(dir_path)
@@ -259,7 +271,7 @@ class DocumentCollection:
             except Exception as e:
                 logging.error(f"Error in {fn}: {e}")
 
-    def _add_doc(self, d):
+    def _add_doc(self, d: dict):
         doc = Document(url="")
         doc.load_from_dict(d)
         if doc.url:
@@ -267,10 +279,10 @@ class DocumentCollection:
         else:
             logging.warning("Skipped doc without URL: %r", d)
 
-    def _add_html(self, h):
-        url, html = h.get("url"), h.get("html")
-        if url in self.documents and html:
-            self.documents[url].html = html
+    def _add_html(self, h: dict):
+        url = list(h.keys())[0]
+        html = h[url]
+        self.documents[url].html = html
 
     def get_document(self, url: str) -> Optional[Document]:
         return self.documents.get(url)
