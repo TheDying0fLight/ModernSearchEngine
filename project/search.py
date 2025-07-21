@@ -59,15 +59,15 @@ class SearchEngine():
 
     def search(self, query: str, max_res=100):
         """Filter and preprocess query for better results and search with the model"""
-        if not re.search(r't[^h\-\s]{1,6}bingen', query.lower()): # add tübingen if it is not part of the query
-            query += ' tuebingen'
+        #if not re.search(r't[^h\-\s]{1,6}bingen', query.lower()): # add tübingen if it is not part of the query
+        #    query += ' tuebingen'
         filtered = [word for word in query.split() if word not in self.stop_words]# filter query for stop words
         filtered_query = ' '.join(filtered)
         urls, similarities = self.retrieve(filtered_query)
 
         relevant_urls = urls[:max_res]
         relevant_similarities = similarities[:max_res]
-        print(relevant_similarities)
+        print(relevant_urls)
 
         # rerank
         query_embedding = self.model.embed(query)

@@ -10,11 +10,14 @@ import numpy as np
 import re
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 import json
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+RELEVANT_TAGS = [
+    "p", "h1", "h2", "h3", "h4", "h5", "h6"
+]
 
 class SiglipStyleModel(nn.Module):
     def __init__(self, model_name: str = "prajjwal1/bert-mini", loss_type: str = "siglip"):
@@ -205,10 +208,15 @@ class BM25():
         self.b = b
         self.k = k
 
-    def preprocess_html(self, html: str, seperator: str = ' ') -> str:
-        soup = BeautifulSoup(html, 'html.parser')
+    RELEVANT_TAGS = [
+        "p", "h1", "h2", "h3", "h4", "h5", "h6",
+    ]
+
+    def preprocess_html(self, html: str, seperator: str = '. ') -> str:
+        relevant_tags = SoupStrainer(RELEVANT_TAGS)
+        soup = BeautifulSoup(html, 'html.parser', parse_only=relevant_tags)
         text = soup.get_text(separator=seperator, strip=True)
-        return text.strip().lower() 
+        return text.strip().lower()
 
     def bag_words(self, words, doc_freqs):
         word_bag = {}
