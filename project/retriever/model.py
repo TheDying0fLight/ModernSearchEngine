@@ -104,7 +104,7 @@ class ColSentenceModel(nn.Module):
     def max_avg_sim(self, doc_tokens, query_tokens, n: int):
         query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
         # shape after bmm (batch size, #doc_tokens, #query_tokens)
-        best_n = torch.sort(torch.bmm(doc_tokens, query_tokens), dim=1, descending=True)[0][:, :n, :]
+        best_n = torch.sort(torch.bmm(doc_tokens, query_tokens), dim=1, descending=True)[0][:, :int(len(doc_tokens)*(n/100)), :]
         return torch.sum(torch.mean(best_n, dim=1, keepdim=True), dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
 
     def avg_sim(self, doc_tokens, query_tokens):
@@ -141,7 +141,7 @@ class ColSentenceModel(nn.Module):
 
     def resolve(self, query_embeddings, document_embeddings, max_sim=True):
         if max_sim:
-            return self.max_sim(document_embeddings, query_embeddings)
+            return self.max_avg_sim(document_embeddings, query_embeddings, 10)
         else:
             return self.avg_sim(document_embeddings, query_embeddings)
 
