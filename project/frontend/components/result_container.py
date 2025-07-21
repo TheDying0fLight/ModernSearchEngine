@@ -1,4 +1,6 @@
 import flet as ft
+from .sentence_heatmap import HorizontalSentenceHeatmap
+from typing import List, Optional
 
 class ResultTitle(ft.Text):
     def __init__(self, text):
@@ -13,29 +15,36 @@ class ResultTitle(ft.Text):
 class ResultContainer(ft.Container):
     """Individual result card component"""
 
-    def __init__(self, title: str, text: str, source: str, metadata: list[str], button: ft.Button, on_click, width=None, max_hight=None):
-        metadata_control = (ft.Column if max_hight else ft.Row)([ft.Text(source, color=ft.Colors.GREEN_600, size=12, weight=ft.FontWeight.BOLD)], spacing=5)
+    def __init__(self, title: str, text: str, source: str, metadata: list[str], button: ft.Button, on_click, width=None, max_hight=None, sentence_scores: list[float] = None):
+        metadata_control = ft.Column([ft.Text(source, color=ft.Colors.GREEN_600, size=12, weight=ft.FontWeight.BOLD)], spacing=5)
         for md in metadata:
-            if not max_hight:
-                metadata_control.controls.append(ft.Text("•", color=ft.Colors.GREY_400, size=12))
             metadata_control.controls.append(ft.Text(md, color=ft.Colors.GREY_600, size=12))
+
+        # Content controls building
+        content_controls = [
+            # Title and favorite button row
+            ft.Row([
+                ResultTitle(title),
+                #ft.Column([], expand=True),
+                button
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.START),
+
+            # Description/snippet
+            ft.Text(text, size=14, color=ft.Colors.GREY_700, max_lines=3),
+
+            ft.Row([], expand=True),  # Spacer before heatmap
+            # Add heatmap
+            HorizontalSentenceHeatmap(
+                sentence_scores=sentence_scores,
+                width=(width - 40) if width else 260,
+                height=20
+            ) if sentence_scores else ft.Row([]),
+            # Metadata row
+            metadata_control
+        ]
+
         super().__init__(
-            content=ft.Column([
-                # Title and favorite button row
-                ft.Row([
-                    ResultTitle(title),
-                    #ft.Column([], expand=True),
-                    button
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.START),
-
-                # Description/snippet
-                ft.Text(text, size=14, color=ft.Colors.GREY_700, max_lines=3),
-
-                ft.Row([], expand=True),
-
-                # Metadata row
-                metadata_control
-            ], spacing=8),
+            content=ft.Column(content_controls, spacing=8),
             padding=20,
             margin=ft.margin.only(bottom=15),
             bgcolor=ft.Colors.WHITE,

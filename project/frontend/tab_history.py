@@ -83,7 +83,7 @@ class HistoryTab(Tab):
                         color=ft.Colors.GREY_800
                     ),
                     ft.Text(
-                        f"Searched at {item['time']} • {item['results_count']} results",
+                        f"Searched at {item['time']}",
                         size=12,
                         color=ft.Colors.GREY_600
                     )
@@ -126,7 +126,7 @@ class HistoryTab(Tab):
             groups[date_key].append(item)
         return groups
 
-    def add_to_history(self, query, results_count=0):
+    def add_to_history(self, query):
         """Add a search query to history"""
         if not query.strip():
             return
@@ -156,7 +156,6 @@ class HistoryTab(Tab):
             'query': query,
             'time': timestamp,
             'date': date_key,
-            'results_count': results_count,
             'timestamp': now
         })
 

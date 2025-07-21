@@ -83,10 +83,10 @@ class SearchTab(Tab):
     def start_loading(self, query):
         self.loading_indicator.show(f"Searching for '{query}'...")
 
-    def display_results(self, query, results):
+    def display_results(self, query, results, time):
         """Display search results"""
         self.loading_indicator.hide()
-        self.results_view.show_results(query, results)
+        self.results_view.show_results(query, results, time)
 
     def clear_results(self):
         """Clear current search results"""
