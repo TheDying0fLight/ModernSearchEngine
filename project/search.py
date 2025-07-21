@@ -22,8 +22,8 @@ class SearchEngine():
         self.cluster_embedding_dict: Dict[str, torch.Tensor] = self._load_embeddings(path=os.path.join(data_folder, cluster_embedding_file))
         self.docs: DocumentCollection = self._load_docs(path=data_folder)
         self.stop_words: Set[str] = self._load_stop_words()
-        self.model: ColSentenceModel = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
-        self.retriever_model = BM25().load()
+        self.model: ColSentenceModel = ColSentenceModel().load("project/retriever/model_uploads/bmini_ColSent_b128_marco_v1.safetensors")
+        self.retriever_model = BM25().load("data/bm25_state.pkl")
 
     def _load_embeddings(self, path: str) -> dict[torch.Tensor, str]:
         return torch.load(path)
@@ -45,7 +45,7 @@ class SearchEngine():
         similarities = {}
         for url in urls:
             embedding = self.embedding_dict[url]
-            sentence_similarity = self.model.sentence_sim(query_embedding, embedding.to(device)).squeeze()
+            sentence_similarity = self.model.sentence_sim(embedding.to(device), query_embedding).squeeze()
             similarities[url] = sentence_similarity.detach().cpu().tolist()
         return similarities
 
@@ -63,7 +63,7 @@ class SearchEngine():
             query += ' tuebingen'
         filtered = [word for word in query.split() if word not in self.stop_words]# filter query for stop words
         filtered_query = ' '.join(filtered)
-        urls, similarities = self.retrieve(filtered_query, max_res=max_res)
+        urls, similarities = self.retrieve(filtered_query)
 
         relevant_urls = urls[:max_res]
         relevant_similarities = similarities[:max_res]
