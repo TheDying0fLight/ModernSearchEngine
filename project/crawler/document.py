@@ -275,12 +275,14 @@ class DocumentCollection:
         doc = Document(url="")
         doc.load_from_dict(d)
         if doc.url:
-            self.documents[doc.url] = doc
+            new_url = doc.url.split("#")[0]
+            self.documents[new_url] = doc
+            self.documents[new_url].url = new_url
         else:
             logging.warning("Skipped doc without URL: %r", d)
 
     def _add_html(self, h: dict):
-        url = list(h.keys())[0]
+        url = list(h.keys())[0].split("#")[0]
         html = h[url]
         self.documents[url].html = html
 

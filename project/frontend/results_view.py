@@ -38,7 +38,7 @@ class ResultCard(ResultContainer):
             button=self.favorite_button,
             on_click=lambda e, result_data=result_data: on_click_callback(result_data) if on_click_callback else None,
             width=300,
-            max_hight=300,
+            max_hight=400,
             sentence_scores=self.result_data.sentence_scores
         )
 
