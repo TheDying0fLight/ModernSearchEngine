@@ -70,7 +70,7 @@ class SearchEngine():
             ranking_score = self.model.resolve(query_embedding, document_embedding)
             ranking_scores.append(ranking_score.detach().cpu())
         ranking_scores = torch.cat(ranking_scores, dim = 0).squeeze().numpy()
-        reranked_idxs = np.argsort(ranking_scores)
+        reranked_idxs = np.argsort(-ranking_scores)
 
         ranked_urls = relevant_urls[reranked_idxs]
 
@@ -97,6 +97,7 @@ class SearchEngine():
         for doc, score, label in zip(docs, scores, labels):
             topics[label].append(doc)
             topic_scores[label].append(score)
+        
         topic_max_scores = np.array([max(s) for s in topic_scores])
         sorted_topic_scores = np.argsort(-topic_max_scores)
         return [topics[i] for i in sorted_topic_scores]
@@ -107,9 +108,24 @@ class SearchEngine():
         docs_by_topics = self.cluster_topics(docs, doc_embeddings, scores, clustering_alg)
         return docs_by_topics, sentence_wise_similarities
 
-    def search_and_save(self, queries: list[str], max_res=100, file_path='evaluation.txt'):
-        for q_i, query in enumerate(queries):
-            urls, _, scores, _ = self.search(query, max_res)
-            with open(file_path, 'w') as f:
+    def search_and_save(self, queries: list[str], max_res=100, file_path='evaluation.txt', idxs=None):
+        if idxs is None:
+            idxs = range(1,len(queries)+1)
+        with open(file_path, 'w') as f:
+            for q_i, query in zip(idxs, queries):
+                urls, _, scores, _ = self.search(query, max_res)
                 for rank, (url, score) in enumerate(zip(urls, scores)):
-                    f.write(q_i + "\t" + rank + "\t" + url + "\t" + score + "\n")
+                    f.write(f"{q_i}\t{rank+1}\t{url}\t{score}\n")
+                
+    def process_batch(self, query_path="queries.txt", result_path="evaluation.txt"):
+        queries = []
+        idxs = []
+        with open(query_path, 'r') as f:
+            for line in f:
+                line_text = line.strip()
+                index = line_text.split("\t")[0]
+                query = line_text.split("\t")[-1]
+                queries.append(query)
+                idxs.append(index)
+        self.search_and_save(queries, file_path=result_path, idxs=idxs)
+            
