@@ -40,22 +40,22 @@ class SearchEngine():
     def get_sentence_wise_similarities(self, query_embedding, relevant):
         similarities = {}
         for url, embedding in relevant:
-            sentence_similarity = self.model.sentence_sim(query_embedding, torch.tensor(embedding).cuda()).squeeze()
+            sentence_similarity = self.model.sentence_sim(torch.tensor(embedding).cuda(), query_embedding).squeeze()
             similarities[url] = sentence_similarity.detach().cpu().tolist()
         return similarities
 
 
     def retrieve(self, query: str):
         similarities = []
-        query_embedding = self.model.embed(query)
+        query_embedding = self.model.embed(query)[0]
         for embedding, _ in tqdm(list(self.embedding_dict.items()), "Similarities"):
             similarity = self.model.resolve(query_embedding, embedding.cuda()).squeeze()
             similarities.append(similarity.detach().cpu())
         urls = np.array(list(self.embedding_dict.values()))
-        embeddings = np.array([torch.mean(e, axis=0) for e in self.embedding_dict.keys()])
+        embeddings = list(self.embedding_dict.keys())
         similarities = np.array(similarities)
         sorted_sim_index = np.argsort(-similarities)
-        return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index], query_embedding
+        return urls[sorted_sim_index], [embeddings[i] for i in sorted_sim_index], similarities[sorted_sim_index], query_embedding
 
 
     def search(self, query: str, max_res=100):
@@ -64,9 +64,9 @@ class SearchEngine():
         if not re.search(r't[^h\-\s]{1,6}bingen', query.lower()): # add tübingen if it is not part of the query
             query += ' tuebingen'
         filtered_query = ' '.join([word for word in query.split() if word not in self.stop_words] ) # filter query for stop words
-        urls, embeddings, similarities, query_embedding = self.retrieve(filtered_query) # retrieve results from model
+        (urls, embeddings, similarities, query_embedding) = self.retrieve(filtered_query) # retrieve results from model
         sentence_wise_similarities = self.get_sentence_wise_similarities(query_embedding, zip(urls[:max_res], embeddings[:max_res])) # get sentence wise similarity for best results
-        logging.info(f'Searched for {filtered_query} (original: {orig_query})')
+        logging.info(f'Searched for "{filtered_query}" (original: "{orig_query}")')
         return urls[:max_res], [self.docs.documents[url] for url in urls[:max_res]], similarities[:max_res], sentence_wise_similarities
 
 
