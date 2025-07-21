@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 default_user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    " (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -68,7 +68,7 @@ class Crawler:
         self.doc_collection_path = os.path.join(path, DOCS_FILE)
         self.html_path = os.path.join(path, HTML_FILE)
 
-        self.write_lock = threading.Lock()
+        self.io_lock = threading.Lock()
 
         self.proxy_manager = ProxyManager(max_workers=max_workers) if use_proxies else None
 
@@ -118,14 +118,10 @@ class Crawler:
     def add_document_to_cache(self, doc: Document):
         """Thread-safe method to add document to cache and handle batch writing."""
         should_save_state = False
-        with self.write_lock:
-            # try to add to collection
+
+        with self.io_lock:
             if self.doc_collection.add_document(doc):
                 self.pending_docs.append(doc)
-                thread_id = threading.current_thread().ident
-                logging.debug(
-                    f"[Thread {thread_id}]: Added new document {doc.url} to cache. Cache size: {len(self.pending_docs)}")
-
                 # if write frequency reached, write to file
                 if len(self.pending_docs) >= self.write_frequency:
                     self._write_pending_data()
@@ -157,7 +153,7 @@ class Crawler:
 
     def finalize_crawl(self, backup: bool = True):
         """Write any remaining documents and save final collection."""
-        with self.write_lock:
+        with self.io_lock:
             # append any remaining pending documents
             if self.pending_docs:
                 self._write_pending_data()
@@ -353,7 +349,7 @@ class Crawler:
 
             urls = list(set(self.get_linked_urls(url, soup)))
             random.shuffle(urls)
-            urls = urls[:100]
+            urls = urls[:50]
             added = self.add_urls_to_frontier(urls, parent_url=url)
             with self.frontier_lock:
                 logging.info(f"Frontier size: {len(self.frontier)}, "
@@ -481,13 +477,13 @@ class Crawler:
                 "frontier": self.frontier.copy(),
                 "domain_delay": self.domain_delay.copy(),
             }
-        with self.write_lock:
+        with self.io_lock:
             with open(self.state_path, 'w') as f: json.dump(state, f)
         logging.debug(f"Saved current state to {self.state_path}")
 
     def load_state(self):
         """Load the frontier and visited pages from a file."""
-        with self.write_lock:
+        with self.io_lock:
             with open(self.state_path, 'r') as f:
                 state = json.load(f)
 
