@@ -41,7 +41,7 @@ class Document:
 
     embedding = None  # Placeholder for embedding, can be set later
 
-    relevant_keywords: list = field(default=[])
+    relevant_keywords: tuple = field(default=())
     relevance_score: int = 0
 
     last_crawl_timestamp: float = field(default_factory=time.time)

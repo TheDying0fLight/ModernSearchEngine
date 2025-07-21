@@ -344,7 +344,7 @@ class Crawler:
 
             doc = self.doc_collection.get_document(url)
             if recrawl and doc: doc._update_html(html)
-            else: doc = Document(url=url, html=html, parent_url=parent_url, relevant_keywords=self.keywords)
+            else: doc = Document(url=url, html=html, parent_url=parent_url, relevant_keywords=tuple(self.keywords))
 
             doc.update_metrics()
 
