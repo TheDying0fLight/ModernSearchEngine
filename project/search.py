@@ -112,4 +112,4 @@ class SearchEngine():
             urls, _, scores, _ = self.search(query, max_res)
             with open(file_path, 'w') as f:
                 for rank, (url, score) in enumerate(zip(urls, scores)):
-                    f.write(q_i + "\t" + rank + "\t" + url + "\t" + score + "\n")
+                    f.write(f"{q_i}\t{rank}\t{url}\t{score}\n")
