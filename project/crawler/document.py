@@ -212,7 +212,7 @@ class Document:
 
 class DocumentCollection:
     def __init__(self):
-        self.documents: Dict[str, Document] = defaultdict(Document)
+        self.documents: Dict[str, Document] = {}
         self.content_hashes: Dict[str, str] = {}
         self.domain_documents: Dict[str, List[str]] = defaultdict(list)
 
