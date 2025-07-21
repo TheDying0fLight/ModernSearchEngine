@@ -1,5 +1,9 @@
 import flet as ft
 import time
+from datetime import datetime
+import logging
+from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, KMeans
+import urllib.parse
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
@@ -7,14 +11,22 @@ from .tab_search import SearchTab
 from .tab_favorites import FavoritesTab
 from .results_view import Result
 
+from project import SearchEngine, Document
+
 class SearchEnginePage:
     """Main page of the search engine with component-based architecture"""
 
-    def __init__(self, page: ft.Page):
+    def __init__(self, page: ft.Page, search_engine: SearchEngine):
         self.page = page
+        self.search_engine = search_engine
         self.page.on_route_change = self.route_change
         self.is_searching = False
         self.current_results = []
+        self.possible_clustering_algos = {
+            'Affinity Propagation': AffinityPropagation(),
+            'Agglomerative Clustering': AgglomerativeClustering(),
+            'KMeans': KMeans()
+        }
 
         # Page setup with modern styling
         page.title = "Tübingen Search Engine"
@@ -27,7 +39,7 @@ class SearchEnginePage:
         # Initialize tab components
         self.help_tab = HelpTab()
         self.favorites_tab = FavoritesTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
-        self.search_tab = SearchTab(page=self.page, on_favorite_toggle=self.handle_favorite_toggle)
+        self.search_tab = SearchTab(page=self.page, clustering_options=list(self.possible_clustering_algos.keys()), on_favorite_toggle=self.handle_favorite_toggle)
         self.history_tab = HistoryTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
 
         # Build the layout
@@ -52,26 +64,31 @@ class SearchEnginePage:
 
     def route_change(self, route):
         template_route = ft.TemplateRoute(self.page.route)
-        if template_route.match('/search?:q'):
-            query = template_route.q.split('=')[1]
-            if not query.strip():
+        if template_route.match('/search?:q&:c'):
+            query = urllib.parse.unquote_plus(template_route.q.split('=')[1])
+            cluster_option = urllib.parse.unquote_plus(template_route.c.split('=')[1])
+            if not query.strip() or cluster_option not in self.possible_clustering_algos:
                 self.page.go('/')
                 return
             self.navigate_to_search_tab()
             self.search_tab.start_loading(query)
-            self.search(query)
+            self.search(query, cluster_option)
         else:
             self.page.go('/')
+
     def navigate_to_search_tab(self):
         """Navigate to the search tab"""
         self.tabs.selected_index = 0
         self.tabs.update()
 
-    def search(self, query: str):
+    def search(self, query: str, cluster_option: str):
         """Enhanced search function with loading state"""
-        mock_results = self.generate_mock_results(query)
-        self.search_tab.display_results(query, mock_results)
-        self.history_tab.add_to_history(query, len(mock_results))
+        clustering_algo = self.possible_clustering_algos[cluster_option]
+        results, sentence_wise_similarities = self.search_engine.search_and_cluster(query, clustering_algo)
+        results = [[self.convert_doc(res) for res in topic] for topic in results]
+
+        self.search_tab.display_results(query, results)
+        self.history_tab.add_to_history(query, len(results)) # TODO
 
     def search_from_history(self, query):
         """Search triggered from history tab"""
@@ -88,93 +105,28 @@ class SearchEnginePage:
             self.favorites_tab.remove_favorite(result_data)
             return True
 
-    def generate_mock_results(self, query: str):
-        """Generate mock search results based on query"""
-        # Enhanced mock results with more variety
-        all_results = MOCK_RESULTS
-        time.sleep(1)
-
-        # Filter results based on query relevance
-        query_lower = query.lower()
-        relevant_results = []
-
-        for result in all_results:
-            title_lower = result.title.lower()
-            snippet_lower = result.snippet.lower()
-
-            # Simple relevance scoring
-            if any(word in title_lower or word in snippet_lower for word in query_lower.split()):
-                relevant_results.append(result)
-
-        # Return relevant results or all results if no specific matches
-        return [relevant_results if relevant_results else all_results[:3] for _ in range(3)]
-
+    def convert_doc(self, doc: Document):
+        return Result(
+            url=doc.url,
+            title=doc.title.strip('\n'),
+            snippet=doc.description.strip("\n"), #doc['snippet'],
+            source=doc.domain,
+            date=datetime.fromtimestamp(doc.last_crawl_timestamp),
+            words=doc.word_count
+        )
 
 
 class PageFactory:
     """Creates new pages of type `SearchEnginePage`"""
     def __init__(self):
-        pass
+        self.search_engine = SearchEngine()
 
     def create_page(self, page: ft.Page):
-            search_engine_page = SearchEnginePage(page)
-            def on_connect(e):
-                page.clean()
-                search_engine_page.build_layout()
-            page.on_connect = on_connect
+        search_engine_page = SearchEnginePage(page, self.search_engine)
+        def on_connect(e):
+            page.clean()
+            search_engine_page.build_layout()
+        page.on_connect = on_connect
 
     def run(self, host: str, port: int):
-        ft.app(self.create_page, view=ft.AppView.WEB_BROWSER, assets_dir="frontend/assets", host=host, port=port)
-
-
-
-MOCK_RESULTS =  [
-    Result(
-        title = "Historical Overview of Tübingen's Old Town",
-        snippet = "Comprehensive guide to Tübingen's medieval architecture, historic buildings, and cultural landmarks in the old town area.",
-        source = "Tourism Board Archives",
-        date = "15.11.2024",
-        pages = "24",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Tübingen University: A 500-Year Legacy",
-        snippet = "The story of one of Germany's oldest universities, its famous alumni, and its impact on the city's development.",
-        source = "University Archives",
-        date = "03.09.2024",
-        pages = "45",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Traditional Swabian Cuisine and Local Beverages",
-        snippet = "A culinary journey through Tübingen's traditional food scene, featuring local specialties, historic restaurants, and brewing traditions.",
-        source = "Regional Food Heritage Archive",
-        date = "22.08.2024",
-        pages = "18",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Hohentübingen Castle: Fortress to Museum",
-        snippet = "The transformation of Tübingen's castle from medieval fortress to modern museum, including archaeological discoveries.",
-        source = "Museum Documentation",
-        date = "07.10.2024",
-        pages = "31",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "The Neckar River and Tübingen's Waterfront",
-        snippet = "How the Neckar River shaped Tübingen's history, from trade routes to modern recreational activities.",
-        source = "Environmental History Society",
-        date = "12.07.2024",
-        pages = "16",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-    Result(
-        title = "Festival Culture in Tübingen",
-        snippet = "Annual festivals, cultural events, and celebrations that define Tübingen's vibrant community life.",
-        source = "Cultural Events Archive",
-        date = "28.06.2024",
-        pages = "22",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-    ),
-]
+        ft.app(self.create_page, view=ft.AppView.WEB_BROWSER, host=host, port=port)

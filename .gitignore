@@ -2,6 +2,9 @@
 crawled (1).jsonl
 crawled.jsonl
 
+# auto complete cache
+english_words.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -176,3 +179,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+/project/retriever/models
+/project/retriever/wandb
+/data
+# datasets folder
+./datasets/
