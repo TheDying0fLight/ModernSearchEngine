@@ -1,4 +1,6 @@
 import flet as ft
+import threading
+import time
 from .autocomplete_engine import get_autocomplete_engine
 
 
@@ -29,9 +31,6 @@ class SuggestionsView:
             self._check_engine_readiness()
 
     def _check_engine_readiness(self):
-        import threading
-        import time
-        
         def check_ready():
             while not self.autocomplete_engine.is_ready():
                 time.sleep(0.5)
@@ -39,7 +38,7 @@ class SuggestionsView:
             self.loading_indicator.visible = False
             self._show_default_suggestions()
             self.suggestions_container.update()
-        
+
         thread = threading.Thread(target=check_ready, daemon=True)
         thread.start()
 
@@ -49,7 +48,7 @@ class SuggestionsView:
 
     def _render_suggestions(self, suggestions, is_default=False):
         self.suggestions_container.controls.clear()
-        
+
         if not suggestions:
             # Show no suggestions message
             self.suggestions_container.controls.append(
