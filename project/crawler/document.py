@@ -17,8 +17,6 @@ DOCS_FILE = "indexed_docs.jsonl"
 
 @dataclass
 class Document:
-    DEFAULT_KEYWORDS = (r't\S+bingen')
-
     url: str
     title: str = ""
     author: str = ""
@@ -43,7 +41,7 @@ class Document:
 
     embedding = None  # Placeholder for embedding, can be set later
 
-    relevant_keywords: tuple = field(default=DEFAULT_KEYWORDS)
+    relevant_keywords: list = field(default=[])
     relevance_score: int = 0
 
     last_crawl_timestamp: float = field(default_factory=time.time)
