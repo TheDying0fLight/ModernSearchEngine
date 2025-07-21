@@ -2,7 +2,7 @@ from readability import Document as ReadabilityDocument
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, element
 from pathlib import Path
 from collections import defaultdict
 import logging
@@ -87,7 +87,7 @@ class Document:
         soup = self.get_soup()
         readable_doc = ReadabilityDocument(self.html)
 
-        text = readable_doc.content if readable_doc and readable_doc.content else soup.get_text(separator=' ', strip=True)
+        text = readable_doc.content() if readable_doc and readable_doc.content() else soup.get_text(separator=' ', strip=True)
         self.title = readable_doc.short_title() if readable_doc and readable_doc.short_title() else ""
         self.word_count = len(text.split())
         self.sentence_count = len([s for s in text.split('.') if s.strip()])
@@ -97,16 +97,31 @@ class Document:
             self.crawl_frequency += 1
 
         description = self.extract_description(soup, readable_doc)
-        site_type = soup.find("meta", property="og:type")
-        for attr in ["author", "article:author"]:
-            meta = soup.find("meta", attrs={"name": attr}) or soup.find("meta", attrs={"property": attr})
-            if meta:
-                author = meta.get("content")
-                break
 
-        self.description = description["content"] if description else "No meta description given"
-        self.author = author if author else "No author available"
-        self.site_type = site_type["content"] if site_type else "No type available"
+        site_type = soup.find("meta", property="og:type")
+        if isinstance(site_type, element.Tag):
+            site_type = site_type.get("content")
+        elif isinstance(site_type, element.NavigableString):
+            site_type = str(site_type).strip()
+        
+        author = None
+        for attr in ["author", "article:author"]:
+            meta_author = soup.find("meta", attrs={"name": attr}) or soup.find("meta", attrs={"property": attr})
+            if isinstance(meta_author, element.Tag):
+                author = meta_author.get("content")
+                break
+            elif isinstance(meta_author, element.NavigableString):
+                author = str(meta_author).strip()
+                break
+        if not author:
+            author = "No author available"
+
+        self.description = description if description else "No description available"
+        self.site_type = site_type if site_type else "No type available"
+        if isinstance(author, str):
+            self.author = author
+        else:
+            self.author = "No author available"
 
         keyword_count = sum(1 for kw in self.relevant_keywords if re.search(kw, self.url, re.IGNORECASE))
 
@@ -127,7 +142,10 @@ class Document:
         if not description: description = soup.find("meta", attrs={"property": "og:description"})
         
         if description and description.get("content"):
-            text = description["content"]
+            if isinstance(description, str):
+                text = description
+            else:
+                text = description["content"]
         else:  # if no meta description, try to extract from paragraphs
             for tag in soup(["script", "style", "head", "footer", "nav"]):
                 tag.decompose()
