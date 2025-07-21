@@ -6,7 +6,7 @@ class HorizontalSentenceHeatmap(ft.Container):
     """
     Horizontal heatmap for sentence importance under the snippet
     """
-    
+
     def __init__(self, sentence_scores: List[float], width: int = 280, height: int = 20):
         """
         Args:
@@ -15,25 +15,23 @@ class HorizontalSentenceHeatmap(ft.Container):
             height: Height of the heatmap
         """
         self.sentence_scores = sentence_scores
-        
+
         # Calculate segment width based on available space
-        segment_width = max(3, width // len(sentence_scores)) if sentence_scores else 4
-        
+        segment_width = max(3, width // len(sentence_scores))
+
         # Create horizontal segments
         segments = []
         for i, score in enumerate(sentence_scores):
-            normalized_score = max(0.0, min(1.0, score))
-            
-            # Color mapping consistent with vertical heatmap - only ~20% colored
-            if normalized_score < 0.7:
+            # Color mapping consistent with vertical heatmap
+            if score < 0.7:
                 color = ft.Colors.GREY_200
-            elif normalized_score < 0.8:
+            elif score < 0.8:
                 color = ft.Colors.ORANGE_400
-            elif normalized_score < 0.9:
+            elif score < 0.9:
                 color = ft.Colors.DEEP_ORANGE_500
             else:
                 color = ft.Colors.RED_500
-            
+
             segments.append(
                 ft.Container(
                     width=segment_width,
@@ -48,7 +46,7 @@ class HorizontalSentenceHeatmap(ft.Container):
                     tooltip=f"Sentence {i+1}: {score:.2f}"
                 )
             )
-        
+
         super().__init__(
             content=ft.Row(
                 controls=segments,

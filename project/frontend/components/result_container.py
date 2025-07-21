@@ -19,7 +19,7 @@ class ResultContainer(ft.Container):
         metadata_control = ft.Column([ft.Text(source, color=ft.Colors.GREEN_600, size=12, weight=ft.FontWeight.BOLD)], spacing=5)
         for md in metadata:
             metadata_control.controls.append(ft.Text(md, color=ft.Colors.GREY_600, size=12))
-        
+
         # Content controls building
         content_controls = [
             # Title and favorite button row
@@ -31,26 +31,19 @@ class ResultContainer(ft.Container):
 
             # Description/snippet
             ft.Text(text, size=14, color=ft.Colors.GREY_700, max_lines=3),
-        ]
-        
-        # Add heatmap if sentence scores are provided
-        if sentence_scores and len(sentence_scores) > 0:
-            heatmap_width = (width - 40) if width else 280  # Account for padding
-            content_controls.extend([
-                ft.Container(height=8),  # Spacer before heatmap
-                HorizontalSentenceHeatmap(
-                    sentence_scores=sentence_scores,
-                    width=heatmap_width,
-                    height=20
-                ),
-            ])
-        
-        content_controls.extend([
+
+            # Add heatmap
+            ft.Container(height=8),  # Spacer before heatmap
+            HorizontalSentenceHeatmap(
+                sentence_scores=sentence_scores,
+                width=(width - 40) if width else 280,
+                height=20
+            ),
             ft.Row([], expand=True),
             # Metadata row
             metadata_control
-        ])
-        
+        ]
+
         super().__init__(
             content=ft.Column(content_controls, spacing=8),
             padding=20,

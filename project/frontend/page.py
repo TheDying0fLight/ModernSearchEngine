@@ -3,6 +3,7 @@ from datetime import datetime
 import logging
 from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, KMeans
 import urllib.parse
+import numpy as np
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
@@ -84,7 +85,7 @@ class SearchEnginePage:
         """Enhanced search function with loading state"""
         clustering_algo = self.possible_clustering_algos[cluster_option]
         results, sentence_wise_similarities = self.search_engine.search_and_cluster(query, clustering_algo)
-        results = [[self.convert_doc(res) for res in topic] for topic in results]
+        results = [[self.convert_doc(res, sentence_wise_similarities) for res in topic] for topic in results]
 
         self.search_tab.display_results(query, results)
         self.history_tab.add_to_history(query, len(results)) # TODO
@@ -104,14 +105,15 @@ class SearchEnginePage:
             self.favorites_tab.remove_favorite(result_data)
             return True
 
-    def convert_doc(self, doc: Document):
+    def convert_doc(self, doc: Document, sentence_wise_similarities: dict[str, np.ndarray]):
         return Result(
             url=doc.url,
             title=doc.title.strip('\n'),
             snippet=doc.description.strip("\n"), #doc['snippet'],
             source=doc.domain,
             date=datetime.fromtimestamp(doc.last_crawl_timestamp),
-            words=doc.word_count
+            words=doc.word_count,
+            sentence_scores=sentence_wise_similarities[doc.url]
         )
 
 
@@ -129,82 +131,3 @@ class PageFactory:
 
     def run(self, host: str, port: int):
         ft.app(self.create_page, view=ft.AppView.WEB_BROWSER, host=host, port=port)
-
-
-MOCK_RESULTS =  [
-    Result(
-        title = "Historical Overview of Tübingen's Old Town",
-        snippet = "Comprehensive guide to Tübingen's medieval architecture, historic buildings, and cultural landmarks in the old town area.",
-        source = "Tourism Board Archives",
-        date = "15.11.2024",
-        words = "24",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-        sentence_scores = [
-            0.0, 0.2, 0.3, 0.7, 0.0, 0.2, 0.3, 0.5, 1.0, 0.3,
-            0.1, 0.8, 0.4, 0.2, 0.9, 0.1, 0.6, 0.3, 0.7, 0.0,
-            0.5, 0.2, 0.8, 0.1, 0.4, 0.9, 0.3, 0.6, 0.0, 0.7,
-            0.2, 0.5, 0.1, 0.8, 0.3, 0.0, 0.6, 0.4, 0.9, 0.2,
-            0.7, 0.1, 0.5, 0.3, 0.8, 0.0, 0.4, 0.6, 0.2, 0.9
-        ],
-    ),
-    Result(
-        title = "Tübingen University: A 500-Year Legacy",
-        snippet = "The story of one of Germany's oldest universities, its famous alumni, and its impact on the city's development.",
-        source = "University Archives",
-        date = "03.09.2024",
-        words = "45",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-        sentence_scores = [
-            0.5, 0.9, 0.7, 0.3, 0.8, 0.1, 0.6, 0.4, 0.2, 0.9,
-            0.3, 0.7, 0.0, 0.5, 0.8, 0.2, 0.6, 0.9, 0.1, 0.4
-        ],
-    ),
-    Result(
-        title = "Traditional Swabian Cuisine and Local Beverages",
-        snippet = "A culinary journey through Tübingen's traditional food scene, featuring local specialties, historic restaurants, and brewing traditions.",
-        source = "Regional Food Heritage Archive",
-        date = "22.08.2024",
-        words = "18",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-        sentence_scores = [
-            0.8, 0.2, 0.6, 0.9, 0.1, 0.4, 0.7, 0.3, 0.5, 0.8,
-            0.0, 0.6, 0.4, 0.9, 0.2, 0.7, 0.1, 0.5, 0.8, 0.3
-        ],
-    ),
-    Result(
-        title = "Hohentübingen Castle: Fortress to Museum",
-        snippet = "The transformation of Tübingen's castle from medieval fortress to modern museum, including archaeological discoveries.",
-        source = "Museum Documentation",
-        date = "07.10.2024",
-        words = "31",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-        sentence_scores = [
-            0.3, 0.8, 0.1, 0.6, 0.9, 0.2, 0.5, 0.7, 0.0, 0.4,
-            0.8, 0.3, 0.9, 0.1, 0.6, 0.4, 0.7, 0.2, 0.5, 0.8
-        ],
-    ),
-    Result(
-        title = "The Neckar River and Tübingen's Waterfront",
-        snippet = "How the Neckar River shaped Tübingen's history, from trade routes to modern recreational activities.",
-        source = "Environmental History Society",
-        date = "12.07.2024",
-        words = "16",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-        sentence_scores = [
-            0.6, 0.1, 0.8, 0.4, 0.2, 0.9, 0.3, 0.7, 0.5, 0.0,
-            0.8, 0.6, 0.2, 0.9, 0.1, 0.5, 0.7, 0.3, 0.4, 0.8
-        ],
-    ),
-    Result(
-        title = "Festival Culture in Tübingen",
-        snippet = "Annual festivals, cultural events, and celebrations that define Tübingen's vibrant community life.",
-        source = "Cultural Events Archive",
-        date = "28.06.2024",
-        words = "22",
-        url = "https://de.wikipedia.org/wiki/Tübingen",
-        sentence_scores = [
-            0.9, 0.3, 0.7, 0.1, 0.5, 0.8, 0.0, 0.4, 0.6, 0.9,
-            0.2, 0.7, 0.5, 0.3, 0.8, 0.1, 0.6, 0.4, 0.9, 0.0
-        ],
-    ),
-]
