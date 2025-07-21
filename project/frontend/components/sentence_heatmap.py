@@ -26,8 +26,10 @@ class HorizontalSentenceHeatmap(ft.Container):
         segments = []
         for i, score in enumerate(bin_max):
             # Color mapping consistent with vertical heatmap
-            if score < 0.7:
+            if score < 0.5:
                 color = ft.Colors.GREY_200
+            elif score < 0.7:
+                color = ft.Colors.YELLOW_400
             elif score < 0.8:
                 color = ft.Colors.ORANGE_400
             elif score < 0.9:
@@ -56,7 +58,7 @@ class HorizontalSentenceHeatmap(ft.Container):
                 spacing=0.5,
                 tight=True
             ),
-            width=min(width, len(sentence_scores) * segment_width + len(sentence_scores)),
+            width=width,
             height=height,
             border=ft.border.all(1, ft.Colors.GREY_300),
             border_radius=4,
