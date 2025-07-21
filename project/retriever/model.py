@@ -9,6 +9,9 @@ import math
 import numpy as np
 import re
 from sentence_transformers import SentenceTransformer
+import tqdm
+from bs4 import BeautifulSoup
+import json
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -198,6 +201,11 @@ class BM25():
         self.b = b
         self.k = k
 
+    def preprocess_html(html: str, seperator: str = ' ') -> str:
+        soup = BeautifulSoup(html, 'html.parser')
+        text = soup.get_text(separator=seperator, strip=True)
+        return text.strip()
+
     def bag_words(self, words, doc_freqs):
         word_bag = {}
         for word in words:
@@ -212,16 +220,17 @@ class BM25():
         return word_bag, doc_freqs
 
     def bag_documents(self, documents):
-        word_bags = []
-        doc_lengths = []
+        word_bags = {}
+        doc_lengths = {}
         doc_freqs = {}
-        for document in documents:
+        for url in documents.keys():
+            document = self.preprocess_html(documents[url])
             words = nltk.tokenize.word_tokenize(document)
             words = [re.sub(r'[^\w\s]', '', word)
                      for word in words if re.sub(r'[^\w\s]', '', word)]  # regex courtesy of G4G
-            doc_lengths.append(len(words))
+            doc_lengths[url] = len(words)
             word_bag, doc_freqs = self.bag_words(words, doc_freqs)
-            word_bags.append(word_bag)
+            word_bags[url] = word_bag
         idfs = self.calc_idf(doc_freqs, len(doc_lengths))
         if len(doc_lengths) > 0:
             avgdl = sum(doc_lengths) / len(doc_lengths)
@@ -236,8 +245,8 @@ class BM25():
         return idfs
 
     def preprocess(self, documents):
-        self.documents = documents  # order of documents determines the implicit indexing
-        word_bags, idfs, avgdl, doc_lenghts = self.bag_documents(documents)
+        #self.documents = documents  # order of documents determines the implicit indexing
+        word_bags, idfs, avgdl, doc_lenghts = self.bag_documents(documents) # documents 
         self.word_bags = word_bags
         self.idfs = idfs
         self.avgdl = avgdl
@@ -250,7 +259,7 @@ class BM25():
             relevance_list.append(self.get_relevance(query_terms, doc_idx))
         return np.array(relevance_list)
 
-    def get_relevance(self, query_terms, doc_idx):
+    def get_relevance(self, query_terms, doc_url):
         score = 0
         for query_term in query_terms:
             if query_term in self.idfs.keys():
@@ -258,13 +267,42 @@ class BM25():
             else:
                 idfs_score = math.log((len(self.word_bags) + 0.5) / 0.5 + 1)
 
-            if query_term in self.word_bags[doc_idx].keys():
-                frequency = self.word_bags[doc_idx][query_term]
+            if query_term in self.word_bags[doc_url].keys():
+                frequency = self.word_bags[doc_url][query_term]
             else:
                 frequency = 0
             score += idfs_score * (frequency * (self.k + 1)) / (frequency + self.k *
-                                                                (1 - self.b + self.b * self.doc_lengths[doc_idx] / self.avgdl))
+                                                                (1 - self.b + self.b * self.doc_lengths[doc_url] / self.avgdl))
         return score
+
+    def resolve(self, query_terms):
+        relevancies = {}
+        for doc_url in tqdm(self.word_bags.keys(), "Retrieving"):
+            relevancies[doc_url] = self.get_relevance(query_terms)
+        return relevancies
+    
+    def save(self, path=""):
+        state_dict = {
+            "word_bags": self.word_bags,
+            "idfs": self.idfs,
+            "avgdl": self.avgdl,
+            "doc_lengths": self.doc_lengths,
+            "k": self.k,
+            "b": self.b
+        }
+        with open(path, "w") as f:
+            json.dump(state_dict, f)
+        
+    def load(self, path=""):
+        with open(path, "r") as f:
+            state_dict = json.load(f)
+        self.word_bags = state_dict["word_bags"]
+        self.idfs = state_dict["idfs"]
+        self.avgdl = state_dict["avgdl"]
+        self.doc_lengths = state_dict["doc_lengths"]
+        self.k = state_dict["k"]
+        self.b = state_dict["b"]
+        
 
 class MentorModel(nn.Module):
     def __init__(self):
