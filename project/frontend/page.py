@@ -1,6 +1,7 @@
 import flet as ft
 from datetime import datetime
 import logging
+import time
 from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, KMeans
 import urllib.parse
 import numpy as np
@@ -84,11 +85,12 @@ class SearchEnginePage:
     def search(self, query: str, cluster_option: str):
         """Enhanced search function with loading state"""
         clustering_algo = self.possible_clustering_algos[cluster_option]
+        time1 = time.time()
         results, sentence_wise_similarities = self.search_engine.search_and_cluster(query, clustering_algo)
         results = [[self.convert_doc(res, sentence_wise_similarities) for res in topic] for topic in results]
-
-        self.search_tab.display_results(query, results)
-        self.history_tab.add_to_history(query, len(results)) # TODO
+        time2 = time.time()
+        self.search_tab.display_results(query, results, time=time2-time1)
+        self.history_tab.add_to_history(query)
 
     def search_from_history(self, query):
         """Search triggered from history tab"""
@@ -105,7 +107,7 @@ class SearchEnginePage:
             self.favorites_tab.remove_favorite(result_data)
             return True
 
-    def convert_doc(self, doc: Document, sentence_wise_similarities: dict[str, np.ndarray]):
+    def convert_doc(self, doc: Document, sentence_wise_similarities: dict[str, list[float]]):
         return Result(
             url=doc.url,
             title=doc.title.strip('\n'),
@@ -113,7 +115,7 @@ class SearchEnginePage:
             source=doc.domain,
             date=datetime.fromtimestamp(doc.last_crawl_timestamp),
             words=doc.word_count,
-            sentence_scores=sentence_wise_similarities[doc.url]
+            sentence_scores=sentence_wise_similarities[doc.url] if type(sentence_wise_similarities[doc.url]) is list else [sentence_wise_similarities[doc.url]]
         )
 
 

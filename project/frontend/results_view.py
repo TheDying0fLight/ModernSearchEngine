@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Optional
 import flet as ft
+import time
 from .components import ResultContainer, EmptyState, ResultTitle
 from .tab import TabTitle
 
@@ -12,7 +13,7 @@ class Result:
     source: str
     date: str
     words: str
-    sentence_scores: Optional[List[float]] = None  # Wichtigkeitswerte für dieses Result
+    sentence_scores:list[float]
 
 
 class ResultCard(ResultContainer):
@@ -66,7 +67,7 @@ class ResultsView(ft.Container):
             visible=False
         )
 
-    def show_results(self, query, results: list[list[Result]]):
+    def show_results(self, query, results: list[list[Result]], time):
         if (not results) or len(results) == 0:
             self.content = results_component = EmptyState(
                 icon=ft.Icons.SEARCH_OFF,
@@ -77,8 +78,7 @@ class ResultsView(ft.Container):
                 on_button_click= lambda e: None,
             )
         else:
-            num_results = sum([len(res) for res in results])
-            title = TabTitle(f"Search results for '{query}' ({num_results} result{'s' if num_results != 1 else ''})")
+            title = TabTitle(f"Best 100 results for '{query}' ({round(time, 2)}s)")
             result_column = []
             for result_row in results:
                 result_column.append(ft.Container(

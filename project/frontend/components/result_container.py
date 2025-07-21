@@ -15,7 +15,7 @@ class ResultTitle(ft.Text):
 class ResultContainer(ft.Container):
     """Individual result card component"""
 
-    def __init__(self, title: str, text: str, source: str, metadata: list[str], button: ft.Button, on_click, width=None, max_hight=None, sentence_scores: Optional[List[float]] = None):
+    def __init__(self, title: str, text: str, source: str, metadata: list[str], button: ft.Button, on_click, width=None, max_hight=None, sentence_scores: list[float] = None):
         metadata_control = ft.Column([ft.Text(source, color=ft.Colors.GREEN_600, size=12, weight=ft.FontWeight.BOLD)], spacing=5)
         for md in metadata:
             metadata_control.controls.append(ft.Text(md, color=ft.Colors.GREY_600, size=12))
@@ -32,14 +32,13 @@ class ResultContainer(ft.Container):
             # Description/snippet
             ft.Text(text, size=14, color=ft.Colors.GREY_700, max_lines=3),
 
+            ft.Row([], expand=True),  # Spacer before heatmap
             # Add heatmap
-            ft.Container(height=8),  # Spacer before heatmap
             HorizontalSentenceHeatmap(
                 sentence_scores=sentence_scores,
-                width=(width - 40) if width else 280,
+                width=(width - 40) if width else 260,
                 height=20
-            ),
-            ft.Row([], expand=True),
+            ) if sentence_scores else ft.Row([]),
             # Metadata row
             metadata_control
         ]
