@@ -1,7 +1,7 @@
 # Modern-Search-Engines-Projekt
 ## Basic Documentation
 
-Install requrements with:
+Install requirements with:
 ```
 pip install -r requirements.txt
 ```
@@ -12,7 +12,7 @@ Start web app with (arguments are optional):
 python -m project [--host 127.0.0.1] [--port 8080] [--no_logging]
 ```
 
-## Important files an folders
+## Important files and folders
 
 - [`Group Project Rules.ipynb`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/blob/main/Group%20Project%20Rules.ipynb): Notebook with cells for crawler, indexing, calculating embeddings, creating evaluation txt
 - [`Crawler.ipynb`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/blob/main/Crawler.ipynb): Notebook for the crawler and crawler debugging
