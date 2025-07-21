@@ -56,7 +56,7 @@ class Crawler:
                  auto_resume: bool = False,
                  path: str = "data"):
         self.use_proxies = use_proxies
-        self.keywords = [re.compile(kw) for kw in keywords]
+        self.keywords = keywords
         self.user_agents = user_agents
         self.max_workers = max_workers
         self.auto_resume = auto_resume
@@ -339,12 +339,12 @@ class Crawler:
             english |= self.is_english(soup)
             if not english: raise BrokenPipeError("Url not detected as English.")
 
-            keywords_found = any(regex.search(html.lower()) for regex in self.keywords)
+            keywords_found = any(re.search(reg, html.lower()) for reg in self.keywords)
             if not keywords_found: raise BrokenPipeError("No keywords found.")
 
             doc = self.doc_collection.get_document(url)
             if recrawl and doc: doc._update_html(html)
-            else: doc = Document(url=url, html=html, parent_url=parent_url)
+            else: doc = Document(url=url, html=html, parent_url=parent_url, relevant_keywords=self.keywords)
 
             doc.update_metrics()
 
