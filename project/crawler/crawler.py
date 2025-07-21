@@ -51,7 +51,7 @@ class Crawler:
     def __init__(self,
                  seed: list[str],
                  max_workers: int = multiprocessing.cpu_count() // 2,
-                 keywords: list = [r't[^h-]{1,6}bingen', 'neckar island'],
+                 keywords: list = [r't[^h\-\s]{1,6}bingen', 'neckar island'],
                  user_agents: list = default_user_agents,
                  use_proxies: bool = False,
                  auto_resume: bool = False,
