@@ -9,9 +9,15 @@ import math
 import numpy as np
 import re
 from sentence_transformers import SentenceTransformer
+from tqdm import tqdm 
+from bs4 import BeautifulSoup, SoupStrainer
+import json
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+RELEVANT_TAGS = [
+    "p", "h1", "h2", "h3", "h4", "h5", "h6"
+]
 
 class SiglipStyleModel(nn.Module):
     def __init__(self, model_name: str = "prajjwal1/bert-mini", loss_type: str = "siglip"):
@@ -95,6 +101,12 @@ class ColSentenceModel(nn.Module):
         # shape after bmm (batch size, #doc_tokens, #query_tokens)
         return torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
 
+    def max_avg_sim(self, doc_tokens, query_tokens, n: int):
+        query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
+        # shape after bmm (batch size, #doc_tokens, #query_tokens)
+        best_n = torch.sort(torch.bmm(doc_tokens, query_tokens), dim=1, descending=True)[0][:, :n, :]
+        return torch.sum(torch.mean(best_n, dim=1, keepdim=True), dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
+
     def avg_sim(self, doc_tokens, query_tokens):
         query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
         # shape after bmm (batch size, #doc_tokens, #query_tokens)
@@ -112,6 +124,10 @@ class ColSentenceModel(nn.Module):
         # Remake shape to be 3d. 
         query_tokens = self.restore_shape(query_tokens)
         doc_tokens = self.restore_shape(doc_tokens)
+
+        # move tensors to device
+        query_tokens = query_tokens.to(device)
+        doc_tokens = doc_tokens.to(device)
 
         # bring query token into expected shape
         query_tokens = query_tokens.transpose(1, 2) 
@@ -198,6 +214,16 @@ class BM25():
         self.b = b
         self.k = k
 
+    RELEVANT_TAGS = [
+        "p", "h1", "h2", "h3", "h4", "h5", "h6",
+    ]
+
+    def preprocess_html(self, html: str, seperator: str = '. ') -> str:
+        relevant_tags = SoupStrainer(RELEVANT_TAGS)
+        soup = BeautifulSoup(html, 'html.parser', parse_only=relevant_tags)
+        text = soup.get_text(separator=seperator, strip=True)
+        return text.strip().lower()
+
     def bag_words(self, words, doc_freqs):
         word_bag = {}
         for word in words:
@@ -212,19 +238,20 @@ class BM25():
         return word_bag, doc_freqs
 
     def bag_documents(self, documents):
-        word_bags = []
-        doc_lengths = []
+        word_bags = {}
+        doc_lengths = {}
         doc_freqs = {}
-        for document in documents:
+        for url in tqdm(documents.keys(), "preprocessing"):
+            document = self.preprocess_html(documents[url])
             words = nltk.tokenize.word_tokenize(document)
             words = [re.sub(r'[^\w\s]', '', word)
                      for word in words if re.sub(r'[^\w\s]', '', word)]  # regex courtesy of G4G
-            doc_lengths.append(len(words))
+            doc_lengths[url] = len(words)
             word_bag, doc_freqs = self.bag_words(words, doc_freqs)
-            word_bags.append(word_bag)
-        idfs = self.calc_idf(doc_freqs, len(doc_lengths))
+            word_bags[url] = word_bag
+        idfs = self.calc_idf(doc_freqs, len(doc_lengths.keys()))
         if len(doc_lengths) > 0:
-            avgdl = sum(doc_lengths) / len(doc_lengths)
+            avgdl = sum(doc_lengths.values()) / len(doc_lengths.values())
         else:
             avgdl = 0
         return word_bags, idfs, avgdl, doc_lengths
@@ -232,12 +259,12 @@ class BM25():
     def calc_idf(self, doc_freqs, num_docs):
         idfs = {}
         for term in doc_freqs.keys():
-            idfs[term] = math.log((num_docs - doc_freqs[term] + 0.5) / (doc_freqs[term] + 0.5) + 1)
+            idfs[term] = math.log((num_docs - doc_freqs[term] + 0.5) / (doc_freqs[term] + 0.5) +1)
         return idfs
 
     def preprocess(self, documents):
-        self.documents = documents  # order of documents determines the implicit indexing
-        word_bags, idfs, avgdl, doc_lenghts = self.bag_documents(documents)
+        #self.documents = documents  # order of documents determines the implicit indexing
+        word_bags, idfs, avgdl, doc_lenghts = self.bag_documents(documents) # documents 
         self.word_bags = word_bags
         self.idfs = idfs
         self.avgdl = avgdl
@@ -246,25 +273,61 @@ class BM25():
     def calculate_rels(self, query):
         query_terms = nltk.tokenize.word_tokenize(query)
         relevance_list = []
-        for doc_idx in range(len(self.word_bags)):
+        for doc_idx in range(len(self.word_bags.keys())):
             relevance_list.append(self.get_relevance(query_terms, doc_idx))
         return np.array(relevance_list)
 
-    def get_relevance(self, query_terms, doc_idx):
+    def get_relevance(self, query_terms, doc_url):
         score = 0
+        print(query_terms)
         for query_term in query_terms:
             if query_term in self.idfs.keys():
                 idfs_score = self.idfs[query_term]
             else:
-                idfs_score = math.log((len(self.word_bags) + 0.5) / 0.5 + 1)
+                idfs_score = math.log((len(self.word_bags.keys()) + 0.5)/0.5 +1)
 
-            if query_term in self.word_bags[doc_idx].keys():
-                frequency = self.word_bags[doc_idx][query_term]
+            if query_term in self.word_bags[doc_url].keys():
+                frequency = self.word_bags[doc_url][query_term]/self.doc_lengths[doc_url]
             else:
                 frequency = 0
-            score += idfs_score * (frequency * (self.k + 1)) / (frequency + self.k *
-                                                                (1 - self.b + self.b * self.doc_lengths[doc_idx] / self.avgdl))
+            
+            doc_len_ratio = self.doc_lengths[doc_url]/self.avgdl
+            numerator = (frequency * (self.k + 1))
+            denominator = (frequency + self.k * (1-self.b + self.b*doc_len_ratio))
+            
+            score += idfs_score * numerator/denominator
         return score
+
+    def resolve(self, query):
+        query_terms = nltk.tokenize.word_tokenize(query.lower())
+        relevancies = {}
+        for doc_url in tqdm(self.word_bags.keys(), "Retrieving"):
+            relevancies[doc_url] = self.get_relevance(query_terms, doc_url)
+        return relevancies
+    
+    def save(self, path=""):
+        state_dict = {
+            "word_bags": self.word_bags,
+            "idfs": self.idfs,
+            "avgdl": self.avgdl,
+            "doc_lengths": self.doc_lengths,
+            "k": self.k,
+            "b": self.b
+        }
+        with open(path, "w") as f:
+            json.dump(state_dict, f)
+        
+    def load(self, path=""):
+        with open(path, "r") as f:
+            state_dict = json.load(f)
+        self.word_bags = state_dict["word_bags"]
+        self.idfs = state_dict["idfs"]
+        self.avgdl = state_dict["avgdl"]
+        self.doc_lengths = state_dict["doc_lengths"]
+        self.k = state_dict["k"]
+        self.b = state_dict["b"]
+        return self
+        
 
 class MentorModel(nn.Module):
     def __init__(self):
