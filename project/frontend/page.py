@@ -1,6 +1,7 @@
 import flet as ft
 from datetime import datetime
 import logging
+from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, KMeans
 import urllib.parse
 
 from .tab_help import HelpTab
@@ -20,6 +21,11 @@ class SearchEnginePage:
         self.page.on_route_change = self.route_change
         self.is_searching = False
         self.current_results = []
+        self.possible_clustering_algos = {
+            'Affinity Propagation': AffinityPropagation(),
+            'Agglomerative Clustering': AgglomerativeClustering(),
+            'KMeans': KMeans()
+        }
 
         # Page setup with modern styling
         page.title = "Tübingen Search Engine"
@@ -32,7 +38,7 @@ class SearchEnginePage:
         # Initialize tab components
         self.help_tab = HelpTab()
         self.favorites_tab = FavoritesTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
-        self.search_tab = SearchTab(page=self.page, on_favorite_toggle=self.handle_favorite_toggle)
+        self.search_tab = SearchTab(page=self.page, clustering_options=list(self.possible_clustering_algos.keys()), on_favorite_toggle=self.handle_favorite_toggle)
         self.history_tab = HistoryTab(page=self.page, on_navigate_to_search=self.navigate_to_search_tab)
 
         # Build the layout
@@ -56,18 +62,16 @@ class SearchEnginePage:
         self.page.add(self.tabs)
 
     def route_change(self, route):
-        
         template_route = ft.TemplateRoute(self.page.route)
-        if template_route.match('/search?:q'):
-            # decode percent-encoding and plus as space
-            query_param = template_route.q.split('=')[1]
-            query = urllib.parse.unquote_plus(query_param)
-            if not query.strip():
+        if template_route.match('/search?:q&:c'):
+            query = urllib.parse.unquote_plus(template_route.q.split('=')[1])
+            cluster_option = urllib.parse.unquote_plus(template_route.c.split('=')[1])
+            if not query.strip() or cluster_option not in self.possible_clustering_algos:
                 self.page.go('/')
                 return
             self.navigate_to_search_tab()
             self.search_tab.start_loading(query)
-            self.search(query)
+            self.search(query, cluster_option)
         else:
             self.page.go('/')
 
@@ -76,9 +80,10 @@ class SearchEnginePage:
         self.tabs.selected_index = 0
         self.tabs.update()
 
-    def search(self, query: str):
+    def search(self, query: str, cluster_option: str):
         """Enhanced search function with loading state"""
-        results = self.search_engine.search_and_cluster(query)
+        clustering_algo = self.possible_clustering_algos[cluster_option]
+        results, sentence_wise_similarities = self.search_engine.search_and_cluster(query, clustering_algo)
         results = [[self.convert_doc(res) for res in topic] for topic in results]
 
         self.search_tab.display_results(query, results)
