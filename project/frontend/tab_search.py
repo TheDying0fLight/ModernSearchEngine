@@ -1,4 +1,7 @@
+import threading
+import time
 import flet as ft
+import re
 from .components import LoadingIndicator, EmptyState, SearchBar, get_autocomplete_engine
 from .results_view import ResultsView, Result
 from.tab import Tab
@@ -6,41 +9,22 @@ from.tab import Tab
 class SearchTab(Tab):
     """Main search tab component containing search interface and results"""
 
-    def __init__(self, page: ft.Page, on_favorite_toggle=None):
+    def __init__(self, page: ft.Page, clustering_options: list[str], on_favorite_toggle=None):
         self.page = page
         self.on_favorite_toggle = on_favorite_toggle
         self.autocomplete_engine = get_autocomplete_engine()
 
-        # Initialize components
-        self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}'))
-        self.loading_indicator = LoadingIndicator("Searching documents...")
-        self.results_view = ResultsView(self.handle_favorite_toggle, self.handle_result_click)
-        
         # Autocomplete status indicator
         self.autocomplete_status = ft.Row([
             ft.Icon(ft.Icons.SMART_TOY, color=ft.Colors.GREEN_500, size=16),
             ft.Text("Smart suggestions ready", size=12, color=ft.Colors.GREEN_600)
         ], alignment=ft.MainAxisAlignment.CENTER, spacing=5)
-        
-        # Create header with enhanced styling
-        self.header = ft.Column([
-                ft.Text(
-                    "🔍 Tübingen Search",
-                    size=32,
-                    weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.BLUE_800
-                ),
-                ft.Text(
-                    "Discover Tübingen's history, culture, and attractions",
-                    size=16,
-                    color=ft.Colors.GREY_600,
-                    text_align=ft.TextAlign.CENTER
-                ),
-                ft.Container(height=10),  # Spacer
-                self.search_bar,
-                ft.Container(height=8),  # Spacer
-                self.autocomplete_status,
-            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True)
+
+        # Initialize components
+        self.search_bar = SearchBar(search_func=lambda query: self.page.go(f'/search?q={query}&c={self.header.get_cluster_option()}'))
+        self.loading_indicator = LoadingIndicator("Searching documents...")
+        self.results_view = ResultsView(self.handle_favorite_toggle, self.handle_result_click)
+        self.header = SearchHeader(self.page, self.search_bar, self.autocomplete_status, clustering_options)
 
         # Check autocomplete status
         self._check_autocomplete_status()
@@ -73,17 +57,12 @@ class SearchTab(Tab):
             self._schedule_status_check()
 
     def _schedule_status_check(self):
-        """Schedule another status check"""
-        import threading
-        import time
-        
         def check_later():
             time.sleep(2)
             if hasattr(self, 'autocomplete_status'):
                 self._check_autocomplete_status()
                 if hasattr(self, 'autocomplete_status'):
                     self.autocomplete_status.update()
-        
         thread = threading.Thread(target=check_later, daemon=True)
         thread.start()
 
@@ -113,40 +92,47 @@ class SearchTab(Tab):
         """Clear current search results"""
         self.results_view.hide_results()
 
-class AdvancedSearchOptions(ft.ExpansionTile):
-    def __init__(self):
-        super().__init__(
-            title=ft.Text("Advanced Search Options"),
-            subtitle=ft.Text("Filters and settings"),
-            collapsed_text_color=ft.Colors.BLUE_600,
-            text_color=ft.Colors.BLUE_800,
-            controls=[
-                ft.Container(
-                    content=ft.Column([
-                        ft.Row([
-                            ft.Checkbox(label="Search titles only", value=False),
-                            ft.Checkbox(label="Exact phrase search", value=False)
-                        ]),
-                        ft.Row([
-                            ft.Checkbox(label="Include historical documents", value=True),
-                            ft.Checkbox(label="Include recent articles", value=True)
-                        ]),
-                        ft.Divider(),
-                        ft.Row([
-                            ft.Text("Document type:", size=14, color=ft.Colors.GREY_700),
-                            ft.Dropdown(
-                                width=150,
-                                value="all",
-                                options=[
-                                    ft.dropdown.Option("all", "All types"),
-                                    ft.dropdown.Option("articles", "Articles"),
-                                    ft.dropdown.Option("guides", "Guides"),
-                                    ft.dropdown.Option("historical", "Historical")
-                                ]
-                            )
-                        ], spacing=10)
-                    ], spacing=10),
-                    padding=10
-                )
-            ]
+class SearchHeader(ft.Row):
+    def __init__(self, page: ft.Page, search_bar: SearchBar, autocomplete_status, cluster_options = list[str]):
+        self.side_width = 250
+        self.page = page
+        self.dropdown = ft.Dropdown(
+            value=cluster_options[0],
+            options=[ft.DropdownOption(s) for s in cluster_options], width=self.side_width,
+            border_color=ft.Colors.GREY_400,
+            text_style=ft.TextStyle(size=14, color=ft.Colors.GREY_600),
+            on_change=lambda e: self.on_cluster_option_change()
         )
+
+        super().__init__([
+            ft.Column([], width=self.side_width),
+            ft.Column([
+                ft.Text(
+                    "🔍 Tübingen Search",
+                    size=32,
+                    weight=ft.FontWeight.BOLD,
+                    color=ft.Colors.BLUE_800
+                ),
+                ft.Text(
+                    "Discover Tübingen's history, culture, and attractions",
+                    size=16,
+                    color=ft.Colors.GREY_600,
+                    text_align=ft.TextAlign.CENTER
+                ),
+                search_bar,
+                autocomplete_status
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True),
+            ft.Column(
+                [ft.Text('Choose Clustering Algorithm', size=14, color=ft.Colors.GREY_600), self.dropdown],
+                width=self.side_width,
+                alignment=ft.MainAxisAlignment.START,
+                horizontal_alignment=ft.CrossAxisAlignment.START),
+            ], vertical_alignment=ft.CrossAxisAlignment.START, spacing=0)
+
+    def get_cluster_option(self):
+        return self.dropdown.value
+
+    def on_cluster_option_change(self):
+        pattern = r'(search\?q=.*&c=)(.*)'
+        new_route = re.sub(pattern, lambda m: m.group(1) + self.get_cluster_option(), self.page.route)
+        self.page.go(new_route)
