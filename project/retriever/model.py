@@ -12,6 +12,7 @@ from sentence_transformers import SentenceTransformer
 from tqdm import tqdm 
 from bs4 import BeautifulSoup, SoupStrainer
 import json
+from readability import Document as ReadabilityDocument
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -214,17 +215,37 @@ class BM25():
         self.b = b
         self.k = k
 
-    RELEVANT_TAGS = [
-        "p", "h1", "h2", "h3", "h4", "h5", "h6",
-    ]
+    # RELEVANT_TAGS = [
+    #     "p", "h1", "h2", "h3", "h4", "h5", "h6",
+    # ]
 
-    def preprocess_html(self, html: str, seperator: str = '. ') -> str:
-        relevant_tags = SoupStrainer(RELEVANT_TAGS)
-        soup = BeautifulSoup(html, 'html.parser', parse_only=relevant_tags)
-        text = soup.get_text(separator=seperator, strip=True)
+    # def preprocess_html(self, html: str, seperator: str = '. ') -> str:
+    #     relevant_tags = SoupStrainer(RELEVANT_TAGS)
+    #     soup = BeautifulSoup(html, 'html.parser', parse_only=relevant_tags)
+    #     text = soup.get_text(separator=seperator, strip=True)
+    #     return text.strip().lower()
+
+    def preprocess_html(self, html: str, seperator: str = ' ') -> str:
+        readable_doc = ReadabilityDocument(html)
+        summary_html = readable_doc.summary(html_partial=True) if readable_doc else None
+        summary_text = None
+        if summary_html:
+            summary_soup = BeautifulSoup(summary_html, 'lxml')
+            for a_tag in summary_soup.find_all('a'):
+                a_tag.decompose()
+            paragraphs = summary_soup.find_all('p')
+            for paragraph in paragraphs:
+                summary_text = "".join(paragraph.get_text(separator=seperator, strip=True))
+
+        if summary_text:
+            text = summary_text
+        else:
+            whole_soup = BeautifulSoup(html, 'lxml')
+            whole_text = whole_soup.get_text(separator=seperator, strip=True)
+            text = whole_text
         return text.strip().lower()
 
-    def bag_words(self, words, doc_freqs):
+    def bag_words(self, words: list[str], doc_freqs: dict[str, int]) -> tuple[dict[str, int], dict[str, int]]:
         word_bag = {}
         for word in words:
             if word in word_bag.keys():
@@ -237,7 +258,7 @@ class BM25():
                     doc_freqs[word] = 1
         return word_bag, doc_freqs
 
-    def bag_documents(self, documents):
+    def bag_documents(self, documents: dict[str, str]) -> tuple[dict[str, dict[str, int]], dict[str, float], float, dict[str, int]]:
         word_bags = {}
         doc_lengths = {}
         doc_freqs = {}
@@ -256,13 +277,13 @@ class BM25():
             avgdl = 0
         return word_bags, idfs, avgdl, doc_lengths
 
-    def calc_idf(self, doc_freqs, num_docs):
+    def calc_idf(self, doc_freqs: dict[str, int], num_docs: int) -> dict[str, float]:
         idfs = {}
         for term in doc_freqs.keys():
             idfs[term] = math.log((num_docs - doc_freqs[term] + 0.5) / (doc_freqs[term] + 0.5) +1)
         return idfs
 
-    def preprocess(self, documents):
+    def preprocess(self, documents: dict[str, str]) -> None:
         #self.documents = documents  # order of documents determines the implicit indexing
         word_bags, idfs, avgdl, doc_lenghts = self.bag_documents(documents) # documents 
         self.word_bags = word_bags
@@ -270,16 +291,15 @@ class BM25():
         self.avgdl = avgdl
         self.doc_lengths = doc_lenghts
 
-    def calculate_rels(self, query):
+    def calculate_rels(self, query: str) -> np.ndarray:
         query_terms = nltk.tokenize.word_tokenize(query)
         relevance_list = []
         for doc_idx in range(len(self.word_bags.keys())):
             relevance_list.append(self.get_relevance(query_terms, doc_idx))
         return np.array(relevance_list)
 
-    def get_relevance(self, query_terms, doc_url):
+    def get_relevance(self, query_terms: list[str], doc_url: str) -> float:
         score = 0
-        print(query_terms)
         for query_term in query_terms:
             if query_term in self.idfs.keys():
                 idfs_score = self.idfs[query_term]
@@ -298,7 +318,7 @@ class BM25():
             score += idfs_score * numerator/denominator
         return score
 
-    def resolve(self, query):
+    def resolve(self, query: str) -> dict[str, float]:
         query_terms = nltk.tokenize.word_tokenize(query.lower())
         relevancies = {}
         for doc_url in tqdm(self.word_bags.keys(), "Retrieving"):
