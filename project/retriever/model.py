@@ -101,6 +101,12 @@ class ColSentenceModel(nn.Module):
         # shape after bmm (batch size, #doc_tokens, #query_tokens)
         return torch.sum(torch.max(torch.bmm(doc_tokens, query_tokens), dim=1, keepdim=True)[0], dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
 
+    def max_avg_sim(self, doc_tokens, query_tokens, n: int):
+        query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
+        # shape after bmm (batch size, #doc_tokens, #query_tokens)
+        best_n = torch.sort(torch.bmm(doc_tokens, query_tokens), dim=1, descending=True)[0][:, :n, :]
+        return torch.sum(torch.mean(best_n, dim=1, keepdim=True), dim=2).reshape((desired_query_shape[0], desired_query_shape[1]))
+
     def avg_sim(self, doc_tokens, query_tokens):
         query_tokens, doc_tokens, desired_query_shape, _ = self.sim_preprocess(query_tokens=query_tokens, doc_tokens=doc_tokens)
         # shape after bmm (batch size, #doc_tokens, #query_tokens)

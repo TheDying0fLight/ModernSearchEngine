@@ -66,8 +66,6 @@ class SearchEngine():
         urls, similarities = self.retrieve(filtered_query)
 
         relevant_urls = urls[:max_res]
-        relevant_similarities = similarities[:max_res]
-        print(relevant_urls)
 
         # rerank
         query_embedding = self.model.embed(query)
@@ -113,3 +111,10 @@ class SearchEngine():
         doc_embeddings = [self.cluster_embedding_dict[url] for url in urls]
         docs_by_topics = self.cluster_topics(docs, doc_embeddings, scores, clustering_alg)
         return docs_by_topics, sentence_wise_similarities
+
+    def search_and_save(self, queries: list[str], max_res=100, file_path='evaluation.txt'):
+        for q_i, query in enumerate(queries):
+            urls, _, scores, _ = self.search(query, max_res)
+            with open(file_path, 'w') as f:
+                for rank, (url, score) in enumerate(zip(urls, scores)):
+                    f.write(q_i + "\t" + rank + "\t" + url + "\t" + score + "\n")
