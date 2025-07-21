@@ -5,7 +5,7 @@ import nltk
 from nltk.corpus import stopwords
 from tqdm import tqdm
 import numpy as np
-from project import SiglipStyleModel, ColSentenceModel, DocumentCollection
+from project import SiglipStyleModel, ColSentenceModel, DocumentCollection, BM25
 from sklearn.cluster import AffinityPropagation
 from bs4 import BeautifulSoup
 from typing import Dict, Set
@@ -18,6 +18,7 @@ class SearchEngine():
         self.stop_words: Set[str] = self._load_stop_words()
         # model = ColSentenceModel().load(r"project\retriever\model_uploads\bmini_ColSent_b128_marco_v1.safetensors")
         self.model: SiglipStyleModel | ColSentenceModel = SiglipStyleModel().load(r"project/retriever/model_uploads/bert-mini_b32_marco_v1.safetensors")
+        self.retriever_model = BM25().load()
 
     def _load_embeddings(self, path: str) -> dict[torch.Tensor, str]:
         return torch.load(path)
@@ -58,25 +59,40 @@ class SearchEngine():
             similarities[url] = sentence_similarity.detach().cpu().tolist()
         return similarities
 
-    def retrieve(self, query: str, max_res=100):
+    def retrieve(self, query: str):
         similarities = []
-        query_embedding = self.model.embed(query)
-        for embedding, _ in tqdm(list(self.embedding_dict.items()), "Similarities"):
-            similarity = self.model.resolve(query_embedding, embedding.cuda()).squeeze()
-            similarities.append(similarity.detach().cpu())
-        urls = np.array(list(self.embedding_dict.values()))
-        embeddings = np.array(list(self.embedding_dict.keys()))
-        similarities = np.array(similarities)
+        similarities = self.retriever_model.resolve(query)
+        urls = np.array(list(similarities.keys()))
+        # embeddings = np.array(list(self.embedding_dict.keys())) # I think this is old code. Embeddings for clustering are handelled differently now
+        similarities = np.array(list(similarities.items()))
         sorted_sim_index = np.argsort(-similarities)
-        relevant_urls = urls[sorted_sim_index[:max_res]]
-        sentence_wise_similarities = self.get_sentence_wise_similarities(query_embedding, relevant_urls)
-        return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index], sentence_wise_similarities
+        # sentence_wise_similarities = self.get_sentence_wise_similarities(query_embedding, relevant_urls)
+        # return urls[sorted_sim_index], embeddings[sorted_sim_index], similarities[sorted_sim_index]
+        return urls[sorted_sim_index], similarities[sorted_sim_index]
 
     def search(self, query: str, max_res=100):
         filtered = [word for word in query.split() if word not in self.stop_words]
         filtered_query = ' '.join(filtered)
-        urls, embeddings, similarities, sentence_wise_similarities = self.retrieve(filtered_query, max_res=max_res)
-        return [self.docs.documents[url] for url in urls[:max_res]], embeddings[:max_res], similarities[:max_res], sentence_wise_similarities
+        urls, similarities = self.retrieve(filtered_query, max_res=max_res)
+
+        relevant_urls = urls[:max_res]
+        relevant_similarities = similarities[:max_res]
+
+        # rerank
+        query_embedding = self.model.embed(query)
+        ranking_scores = []
+        for relevant_url in tqdm(relevant_urls, "Reranking"):
+            document_embedding = self.embedding_dict[relevant_url]
+            ranking_score = self.model.resolve(query_embedding, document_embedding)
+            ranking_scores.append(ranking_score)
+        ranking_scores = np.array(ranking_scores)
+        reranked_idxs = np.argsort(ranking_scores)
+
+        embeddings = np.zeros((max_res, 256))
+
+        # get sentence wise similarities
+        sentence_wise_similarities = self.get_sentence_wise_similarities(query_embedding, relevant_urls)
+        return [self.docs.documents[url] for url in relevant_urls[reranked_idxs]], embeddings, relevant_similarities[reranked_idxs], sentence_wise_similarities
 
     def search_and_cluster(self, query, max_res=100):
         docs, embeddings, scores, sentence_wise_similarities = self.search(query, max_res)
