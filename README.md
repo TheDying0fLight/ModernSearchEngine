@@ -14,7 +14,7 @@ python -m project [--host 127.0.0.1] [--port 8080] [--no_logging]
 
 ## Important files an folders
 
-- [`Group Project Rules.ipynb`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/blob/main/Group%20Project%20Rules.ipynb): Notbook with cells for crawler, indexing, calculating embeddings, creating evaluation txt
+- [`Group Project Rules.ipynb`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/blob/main/Group%20Project%20Rules.ipynb): Notebook with cells for crawler, indexing, calculating embeddings, creating evaluation txt
 - [`Crawler.ipynb`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/blob/main/Crawler.ipynb): Notebook for the crawler and crawler debugging
 - [`Clustering.ipynb`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/blob/main/Clustering.ipynb): Notebook for testing diffrent clustering methodes to identify the topics
 - [`project/search.py`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/blob/main/project/search.py): Main `SearchEnginge` class that loads all embeddings and can execure searches and clustering
