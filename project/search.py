@@ -23,7 +23,7 @@ class SearchEngine():
         self.docs: DocumentCollection = self._load_docs(path=data_folder)
         self.stop_words: Set[str] = self._load_stop_words()
         self.model: ColSentenceModel = ColSentenceModel().load("project/retriever/model_uploads/bmini_ColSent_b128_marco_v1.safetensors")
-        self.retriever_model = BM25().load("data/bm25_state.pkl")
+        self.retriever_model = BM25().load("data/bm25_state.json")
 
     def _load_embeddings(self, path: str) -> dict[torch.Tensor, str]:
         return torch.load(path)
@@ -53,7 +53,7 @@ class SearchEngine():
         similarities = []
         similarities = self.retriever_model.resolve(query)
         urls = np.array(list(similarities.keys()))
-        similarities = np.array(list(similarities.items()))
+        similarities = np.array([similarities[url] for url in urls])
         sorted_sim_index = np.argsort(-similarities)
         return urls[sorted_sim_index], similarities[sorted_sim_index]
 
@@ -67,6 +67,7 @@ class SearchEngine():
 
         relevant_urls = urls[:max_res]
         relevant_similarities = similarities[:max_res]
+        print(relevant_similarities)
 
         # rerank
         query_embedding = self.model.embed(query)
@@ -74,8 +75,8 @@ class SearchEngine():
         for relevant_url in tqdm(relevant_urls, "Reranking"):
             document_embedding = self.embedding_dict[relevant_url]
             ranking_score = self.model.resolve(query_embedding, document_embedding)
-            ranking_scores.append(ranking_score)
-        ranking_scores = np.array(ranking_scores)
+            ranking_scores.append(ranking_score.detach().cpu())
+        ranking_scores = torch.cat(ranking_scores, dim = 0).squeeze().numpy()
         reranked_idxs = np.argsort(ranking_scores)
 
         ranked_urls = relevant_urls[reranked_idxs]
