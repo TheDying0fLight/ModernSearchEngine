@@ -6,7 +6,7 @@ Install requirements with:
 pip install -r requirements.txt
 ```
 
-The data for the search engine has to be in a `data` folder. Copy the data from e.g. `final/cutoff` into a `data` folder which should look like:
+The data for the search engine has to be in a `data` folder. Copy the data from e.g. [`final/cutoff`](https://github.com/Cari1111/Modern-Search-Engines-Lecture/tree/extra/final_data/cutoff) into a `data` folder which should look like:
 
 ```
 Modern-Search-Engines-Lecture-
