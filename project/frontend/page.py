@@ -1,11 +1,8 @@
 import flet as ft
 import time
 from datetime import datetime
-import logging
-import time
 from sklearn.cluster import AffinityPropagation, AgglomerativeClustering, KMeans
 import urllib.parse
-import numpy as np
 
 from .tab_help import HelpTab
 from .tab_history import HistoryTab
@@ -120,10 +117,10 @@ class SearchEnginePage:
         )
 
 
-class PageFactory:
+class PageFactory():
     """Creates new pages of type `SearchEnginePage`"""
     def __init__(self):
-        self.search_engine = SearchEngine()
+        self.search_engine = SearchEngine("data")
 
     def create_page(self, page: ft.Page):
         search_engine_page = SearchEnginePage(page, self.search_engine)

@@ -6,6 +6,7 @@ from tqdm import tqdm
 import numpy as np
 from sklearn.base import ClusterMixin
 from typing import Dict, Set
+import re
 
 from project import SiglipStyleModel, ColSentenceModel, DocumentCollection, Document, BM25
 
@@ -54,11 +55,13 @@ class SearchEngine():
 
     def search(self, query: str, max_res=100):
         """Filter and preprocess query for better results and search with the model"""
-        #if not re.search(r't[^h\-\s]{1,6}bingen', query.lower()): # add tübingen if it is not part of the query
-        #    query += ' tuebingen'
-        filtered = [word for word in query.split() if word not in self.stop_words]# filter query for stop words
+        advanced_query = re.sub(r't[^h\-\s]{1,6}bingen', '', query.lower())
+
+        filtered = [word for word in advanced_query.split() if word not in self.stop_words]# filter query for stop words
         filtered_query = ' '.join(filtered)
         urls, similarities = self.retrieve(filtered_query)
+        if filtered_query.strip() and query != filtered_query:
+            query = f"{filtered_query}. {query}"
 
         relevant_urls = urls[:max_res]
 
