@@ -6,6 +6,17 @@ Install requirements with:
 pip install -r requirements.txt
 ```
 
+The data for the search engine has to be in a `data` folder. Copy the data from e.g. `final/cutoff` into a `data` folder which should look like:
+
+```
+Modern-Search-Engines-Lecture-
+└── data
+    ├── bm25_state.json
+    ├── clustering_embeddings.pkl
+    ├── embeddings.pkl
+    └── indexed_docs.jsonl
+```
+
 Start web app with (arguments are optional):
 
 ```
