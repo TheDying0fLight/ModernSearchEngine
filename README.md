@@ -1,4 +1,4 @@
-# Modern-Search-Engines-Projekt
+# Tü-Search
 
 <img height="400" alt="tüsearch" src="https://github.com/user-attachments/assets/eba5d548-4afe-4876-9f8d-afd2b19bfc76" />
 
